@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "oncefold"
+version = "0.1.0"
+description = "Portable reuse evidence for agent tools"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+authors = [{ name = "Oncefold contributors" }]
+keywords = ["agents", "mcp", "interoperability", "provenance", "protocol"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Libraries",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/Smkz-Entertainment/Oncefold"
+Repository = "https://github.com/Smkz-Entertainment/Oncefold"
+Documentation = "https://github.com/Smkz-Entertainment/Oncefold/tree/main/docs"
+Issues = "https://github.com/Smkz-Entertainment/Oncefold/issues"
+
+[project.optional-dependencies]
+dev = [
+  "build>=1.2",
+  "hypothesis>=6.100",
+  "mypy>=1.11",
+  "pip-audit>=2.7",
+  "pytest>=8.0",
+  "ruff>=0.6",
+]
+
+[project.scripts]
+oncefold = "oncefold.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests", "examples", "conformance"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+pythonpath = ["src"]

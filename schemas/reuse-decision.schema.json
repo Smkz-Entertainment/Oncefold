@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oncefold.dev/schemas/reuse-decision/1",
+  "title": "Oncefold Reuse Decision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["state", "reason"],
+  "properties": {
+    "state": {
+      "enum": [
+        "REUSABLE_EXACT", "REQUIRES_VALIDATION", "ADVISORY_ONLY", "REVOKED",
+        "STALE", "SCOPE_MISMATCH", "UNSAFE", "UNKNOWN"
+      ]
+    },
+    "reason": {"type": "string", "maxLength": 4096},
+    "receipt_digest": {"anyOf": [{"type": "string", "pattern": "^[0-9a-f]{64}$"}, {"type": "null"}]}
+  }
+}

@@ -1,0 +1,8 @@
+Oncefold
+
+Copyright 2026 Oncefold contributors.
+
+The public tree does not copy third-party source code. The independent Go
+conformance implementation declares golang.org/x/text as a build dependency;
+that dependency remains subject to its upstream license and notices when
+downloaded by Go tooling.

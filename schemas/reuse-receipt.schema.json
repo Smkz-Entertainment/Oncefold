@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oncefold.dev/schemas/reuse-receipt/1",
+  "title": "Oncefold Reuse Receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "action", "action_digest", "result_digest", "media_type",
+    "producer_identity", "reuse_class", "created_at", "dependency_snapshot",
+    "trust_scope", "cache_scope", "receipt_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "oncefold.receipt/1"},
+    "action": {"$ref": "action-identity.schema.json"},
+    "action_digest": {"$ref": "#/$defs/digest"},
+    "result_digest": {"$ref": "#/$defs/digest"},
+    "result_reference": {"anyOf": [{"type": "string", "maxLength": 4096}, {"type": "null"}]},
+    "media_type": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "producer_identity": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "reuse_class": {"enum": ["EXACT", "VERIFIED", "ADVISORY", "UNSAFE"]},
+    "created_at": {"type": "string", "minLength": 1, "maxLength": 128},
+    "dependency_snapshot": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/dependency"}},
+    "provenance": {"$ref": "#/$defs/stringMap"},
+    "trust_scope": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "cache_scope": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "revocation_ref": {"anyOf": [{"type": "string", "maxLength": 4096}, {"type": "null"}]},
+    "validator_identity": {"anyOf": [{"type": "string", "maxLength": 4096}, {"type": "null"}]},
+    "execution_metadata": {"$ref": "#/$defs/stringMap"},
+    "economics": {"$ref": "#/$defs/stringMap"},
+    "receipt_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "stringMap": {
+      "type": "object",
+      "maxProperties": 256,
+      "additionalProperties": {"type": "string", "maxLength": 4096}
+    },
+    "dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "identity", "digest"],
+      "properties": {
+        "kind": {"type": "string", "minLength": 1, "maxLength": 128},
+        "identity": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "digest": {"$ref": "#/$defs/digest"},
+        "required": {"type": "boolean"}
+      }
+    }
+  }
+}

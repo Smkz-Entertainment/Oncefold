@@ -1,0 +1,18 @@
+{
+  "experiment": "oncefold-v5.1-adequacy-missingness-closure",
+  "formal_verdict": "KILL",
+  "attempts": 96,
+  "authentic_completed": 95,
+  "incomplete": 1,
+  "primary_observations": 70,
+  "safe_natural_repeats": 5,
+  "observation_weighted_reuse": 0.0714285714,
+  "duration_weighted_reuse": 0.1280785929,
+  "cross_runtime_safe_repeats": 0,
+  "completion_quality_gates_passed": true,
+  "target_primary_observations": 64,
+  "standalone_kill_threshold": 0.15,
+  "live_canary_entered": false,
+  "suppressed_calls": 0,
+  "interpretation": "The adequate authentic corpus did not support a broad standalone cache thesis."
+}

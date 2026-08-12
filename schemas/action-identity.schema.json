@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oncefold.dev/schemas/action-identity/1",
+  "title": "Oncefold Action Identity",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "operation_identity", "operation_version", "input_digest"],
+  "properties": {
+    "schema_version": {"const": "oncefold.action/1"},
+    "operation_identity": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "operation_version": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "input_digest": {"$ref": "#/$defs/digest"},
+    "trust_scope": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "environment": {"$ref": "#/$defs/stringMap"},
+    "dependencies": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/dependency"}},
+    "side_effect_class": {"enum": ["READ_ONLY", "LOCAL_WRITE", "EXTERNAL_MUTATION", "UNKNOWN"]},
+    "authorization_scope_digest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+    "freshness": {"$ref": "#/$defs/stringMap"},
+    "dependency_completeness": {"type": "boolean"},
+    "validator_identity": {"anyOf": [{"type": "string", "maxLength": 4096}, {"type": "null"}]}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "stringMap": {
+      "type": "object",
+      "maxProperties": 256,
+      "additionalProperties": {"type": "string", "maxLength": 4096}
+    },
+    "dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "identity", "digest"],
+      "properties": {
+        "kind": {"type": "string", "minLength": 1, "maxLength": 128},
+        "identity": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "digest": {"$ref": "#/$defs/digest"},
+        "required": {"type": "boolean"}
+      }
+    }
+  }
+}
