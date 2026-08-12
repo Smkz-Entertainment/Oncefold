@@ -62,6 +62,8 @@ def _check_unicode(value: Any) -> None:
             value.encode("utf-8")
         except UnicodeEncodeError as exc:
             raise ValueError("JSON contains an invalid Unicode scalar") from exc
+        if any(char in "\u2028\u2029" for char in value):
+            raise ValueError("JSON contains a prohibited line-separator code point")
     elif isinstance(value, Mapping):
         if len(value) > MAX_JSON_COLLECTION:
             raise ValueError("JSON object exceeds the input bound")

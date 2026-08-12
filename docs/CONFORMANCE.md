@@ -8,7 +8,7 @@ integrity, incomplete declarations, malformed fields, Unicode NFC, advisory
   and verified classes, and duplicate dependencies.
 
 The document also carries shared timestamp, duplicate-key, number-rejection,
-and invalid-Unicode ingress cases. The trust policy in the document binds the
+and invalid-Unicode/line-separator ingress cases. The trust policy in the document binds the
 base producer, cache scope, and provenance so an exact result cannot pass only
 because its self-declared digest is valid.
 

@@ -70,7 +70,7 @@ class MCPShadowProxy:
         environment: Mapping[str, str] = {},
         authorization_scope_digest: str | None = None,
         validator_identity: str | None = None,
-        dependency_completeness: bool = True,
+        dependency_completeness: bool = False,
     ) -> ActionIdentity:
         name, arguments = self._call_parts(request)
         return ActionIdentity(
@@ -128,7 +128,7 @@ class MCPShadowProxy:
         producer_identity: str = "mcp-server",
         validator_identity: str | None = None,
         cache_scope: str = "private",
-        dependency_completeness: bool = True,
+        dependency_completeness: bool = False,
         created_at: datetime | None = None,
     ) -> ShadowObservation:
         action = self.action_for_request(
@@ -177,7 +177,7 @@ class MCPShadowProxy:
         dependencies: Sequence[DependencyDescriptor] = (),
         environment: Mapping[str, str] = {},
         authorization_scope_digest: str | None = None,
-        dependency_completeness: bool = True,
+        dependency_completeness: bool = False,
     ) -> ShadowObservation:
         action = self.action_for_request(
             request,
@@ -211,7 +211,7 @@ class MCPShadowProxy:
         producer_identity: str = "mcp-server",
         validator_identity: str | None = None,
         cache_scope: str = "private",
-        dependency_completeness: bool = True,
+        dependency_completeness: bool = False,
     ) -> ShadowObservation:
         prior = self.evaluate_tools_call(
             request,

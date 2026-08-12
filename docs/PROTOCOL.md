@@ -28,15 +28,16 @@ Canonicalization MUST:
 
 1. normalize every string and object key to Unicode NFC;
 2. reject control characters below U+0020;
-3. reject strings longer than 4,096 Unicode scalar values;
-4. reject arrays or objects with more than 256 entries;
-5. reject nesting deeper than 16 levels;
-6. reject non-string object keys and normalized key collisions;
-7. sort object keys after NFC normalization by their UTF-8 byte sequences;
-8. preserve array order;
-9. reject all JSON numbers; producers MUST supply an opaque precomputed input
+3. reject U+2028 and U+2029 line-separator code points;
+4. reject strings longer than 4,096 Unicode scalar values;
+5. reject arrays or objects with more than 256 entries;
+6. reject nesting deeper than 16 levels;
+7. reject non-string object keys and normalized key collisions;
+8. sort object keys after NFC normalization by their UTF-8 byte sequences;
+9. preserve array order;
+10. reject all JSON numbers; producers MUST supply an opaque precomputed input
    digest when an external input contains numbers; and
-10. emit compact JSON encoded as UTF-8, without insignificant whitespace.
+11. emit compact JSON encoded as UTF-8, without insignificant whitespace.
 
 The version 1 Action Identity and Reuse Receipt schemas contain no numeric
 fields. Implementations MUST validate schema field types before hashing; they
@@ -52,9 +53,9 @@ choosing one value.
 
 Protocol JSON ingress MUST be bounded to 1 MiB, 32 nesting levels, and 256
 members per object or array. It MUST reject duplicate object keys, non-standard
-JSON constants, all JSON numbers, and invalid Unicode scalar sequences. These
-checks apply before schema parsing; a parser MUST NOT silently accept a later
-duplicate key.
+JSON constants, all JSON numbers, invalid Unicode scalar sequences, and U+2028 /
+U+2029 line-separator code points. These checks apply before schema parsing; a
+parser MUST NOT silently accept a later duplicate key.
 
 ## 3. Action Identity
 
@@ -63,7 +64,8 @@ The required fields are:
 - `schema_version`: exactly `oncefold.action/1`;
 - `operation_identity`: stable tool/action identity;
 - `operation_version`: version of the operation contract; and
-- `input_digest`: lowercase SHA-256 digest of canonicalized inputs.
+- `input_digest`: lowercase SHA-256 digest of canonicalized inputs;
+- `dependency_completeness`: an explicit boolean completeness assertion.
 
 Optional fields have these defaults when omitted:
 
@@ -73,18 +75,23 @@ Optional fields have these defaults when omitted:
 - `side_effect_class`: `UNKNOWN`;
 - `authorization_scope_digest`: `null`;
 - `freshness`: `{}`;
-- `dependency_completeness`: `true`; and
 - `validator_identity`: `null`.
 
 Unknown fields MUST be rejected. Explicit `null` is not a substitute for an
 omitted map, array, or required string.
+
+`dependency_completeness` has no omission default. A producer MUST explicitly
+set it to `true` only when all relevant dependencies were observed, or to
+`false` when relevant inputs were omitted or cannot be observed completely.
+Consumers MUST fail closed for `false`; an omitted wire field is malformed.
 
 Dependencies are objects with `kind`, `identity`, `digest`, and optional
 boolean `required` (default `true`). Dependency `digest` values MUST be
 lowercase SHA-256 digests. Duplicate dependency identities, defined as equal
 `(kind, identity)`, are malformed. Implementations MUST sort dependencies by
 `kind`, `identity`, and `digest` before canonical serialization, comparing each
-field by its UTF-8 byte sequence. A producer
+field by its UTF-8 byte sequence. `kind` is limited to 128 Unicode scalar
+values; `identity` and `digest` use the general string and digest bounds. A producer
 MUST set `dependency_completeness` to `false` when relevant inputs are omitted
 or cannot be observed completely; a consumer MUST fail closed for incomplete
 declarations.

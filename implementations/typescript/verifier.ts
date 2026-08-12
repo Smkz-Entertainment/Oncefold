@@ -69,6 +69,7 @@ function fail(message: string): never {
 function assertWellFormed(value: string, name: string): void {
   for (let index = 0; index < value.length; index += 1) {
     const code = value.charCodeAt(index);
+    if (code === 0x2028 || code === 0x2029) fail(`${name} contains a prohibited line-separator code point`);
     if (code >= 0xd800 && code <= 0xdbff) {
       const next = value.charCodeAt(index + 1);
       if (Number.isNaN(next) || next < 0xdc00 || next > 0xdfff) fail(`${name} contains an invalid Unicode scalar`);
@@ -84,11 +85,11 @@ function object(value: unknown, name: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function text(value: unknown, name: string, optional = false): string | null {
+function text(value: unknown, name: string, optional = false, maxLength = 4096): string | null {
   if (value === null && optional) return null;
   if (typeof value !== "string" || (!optional && value.length === 0)) fail(`${name} must be a string`);
   assertWellFormed(value, name);
-  if ([...value].length > 4096 || [...value].some((char) => char.codePointAt(0)! < 0x20)) {
+  if ([...value].length > maxLength || [...value].some((char) => char.codePointAt(0)! < 0x20)) {
     fail(`${name} exceeds canonical bounds`);
   }
   return value;
@@ -318,7 +319,7 @@ function dependency(value: unknown): Record<string, JsonValue> {
   const source = object(value, "dependency");
   allowed(source, ["kind", "identity", "digest"], ["required"], "dependency");
   const parsed: Record<string, JsonValue> = {
-    kind: text(source.kind, "dependency.kind")!,
+    kind: text(source.kind, "dependency.kind", false, 128)!,
     identity: text(source.identity, "dependency.identity")!,
     digest: digest(source.digest, "dependency.digest"),
     required: source.required === undefined ? true : source.required as boolean,
@@ -348,7 +349,7 @@ function dependencies(value: unknown, name: string): Record<string, JsonValue>[]
 
 export function parseAction(value: unknown): Action {
   const source = object(value, "action identity");
-  allowed(source, ["schema_version", "operation_identity", "operation_version", "input_digest"], ["trust_scope", "environment", "dependencies", "side_effect_class", "authorization_scope_digest", "freshness", "dependency_completeness", "validator_identity"], "action identity");
+  allowed(source, ["schema_version", "operation_identity", "operation_version", "input_digest", "dependency_completeness"], ["trust_scope", "environment", "dependencies", "side_effect_class", "authorization_scope_digest", "freshness", "validator_identity"], "action identity");
   const schema = text(source.schema_version, "schema_version");
   if (schema !== ACTION_SCHEMA) fail(`unsupported action schema ${schema}`);
   const operationIdentity = text(source.operation_identity, "operation_identity")!;
@@ -361,7 +362,7 @@ export function parseAction(value: unknown): Action {
   if (!SIDE_EFFECTS.has(sideEffectClass)) fail("unknown side effect class");
   const authorizationScopeDigest = source.authorization_scope_digest === undefined ? null : source.authorization_scope_digest === null ? null : digest(source.authorization_scope_digest, "authorization_scope_digest");
   const freshness = stringMap(source.freshness, "freshness");
-  const dependencyCompleteness = source.dependency_completeness === undefined ? true : source.dependency_completeness as boolean;
+  const dependencyCompleteness = source.dependency_completeness as boolean;
   if (typeof dependencyCompleteness !== "boolean") fail("dependency_completeness must be boolean");
   const validatorIdentity = source.validator_identity === undefined ? null : text(source.validator_identity, "validator_identity", true);
   const raw: Record<string, JsonValue> = {
@@ -433,7 +434,7 @@ function admits(receipt: Receipt, policy: TrustPolicy | undefined): boolean {
   return Object.entries(policy.requiredProvenance ?? {}).every(([key, value]) => receipt.provenance[key] === value);
 }
 
-export function evaluate(action: Action, receipt: Receipt, options: { revoked?: boolean; availableResultDigest?: string; validatorResult?: boolean; trustPolicy?: TrustPolicy } = {}): Decision {
+export function evaluate(action: Action, receipt: Receipt, options: { revoked?: boolean; availableResultDigest?: string; validatorResult?: unknown; trustPolicy?: TrustPolicy } = {}): Decision {
   const receiptDigest = receipt.digest;
   if (options.revoked || receipt.revocationRef !== null) return { state: "REVOKED", reason: "receipt revoked", receiptDigest };
   if (action.trustScope !== receipt.trustScope || action.trustScope !== receipt.action.trustScope || action.authorizationScopeDigest !== receipt.action.authorizationScopeDigest) return { state: "SCOPE_MISMATCH", reason: "scope mismatch", receiptDigest };
@@ -450,6 +451,7 @@ export function evaluate(action: Action, receipt: Receipt, options: { revoked?: 
   if (receipt.reuseClass === "VERIFIED") {
     if (!admits(receipt, options.trustPolicy)) return { state: "UNKNOWN", reason: "receipt producer, cache scope, or provenance is not trusted", receiptDigest };
     if (receipt.validatorIdentity === null || receipt.validatorIdentity !== action.validatorIdentity) return { state: "REQUIRES_VALIDATION", reason: "matching validator identity required", receiptDigest };
+    if (options.validatorResult !== undefined && typeof options.validatorResult !== "boolean") return { state: "UNKNOWN", reason: "current validator returned a non-boolean result", receiptDigest };
     if (options.validatorResult === undefined) return { state: "REQUIRES_VALIDATION", reason: "current validator required", receiptDigest };
     return options.validatorResult ? { state: "REUSABLE_EXACT", reason: "current validator passed", receiptDigest } : { state: "STALE", reason: "current validator rejected receipt", receiptDigest };
   }

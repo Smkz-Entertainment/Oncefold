@@ -15,6 +15,7 @@ from typing import Any
 MAX_STRING_LENGTH = 4096
 MAX_COLLECTION_LENGTH = 256
 MAX_CANONICAL_DEPTH = 16
+MAX_DEPENDENCY_KIND_LENGTH = 128
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 _TIMESTAMP_RE = re.compile(
     r"^[1-9][0-9]{3}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{6})?Z$"
@@ -39,7 +40,13 @@ class SideEffectClass(StrEnum):
     UNKNOWN = "UNKNOWN"
 
 
-def _bounded_string(value: object, field_name: str, *, required: bool = True) -> str:
+def _bounded_string(
+    value: object,
+    field_name: str,
+    *,
+    required: bool = True,
+    max_length: int = MAX_STRING_LENGTH,
+) -> str:
     if not isinstance(value, str):
         raise TypeError(f"{field_name} must be a string")
     if required and not value:
@@ -48,7 +55,9 @@ def _bounded_string(value: object, field_name: str, *, required: bool = True) ->
         value.encode("utf-8")
     except UnicodeEncodeError as exc:
         raise ValueError(f"{field_name} contains an invalid Unicode scalar") from exc
-    if len(value) > MAX_STRING_LENGTH or any(ord(char) < 0x20 for char in value):
+    if any(char in "\u2028\u2029" for char in value):
+        raise ValueError(f"{field_name} contains a prohibited line-separator code point")
+    if len(value) > max_length or any(ord(char) < 0x20 for char in value):
         raise ValueError(f"{field_name} is invalid or exceeds the canonical bound")
     return value
 
@@ -139,7 +148,11 @@ class DependencyDescriptor:
     required: bool = True
 
     def __post_init__(self) -> None:
-        _bounded_string(self.kind, "dependency kind")
+        _bounded_string(
+            self.kind,
+            "dependency kind",
+            max_length=MAX_DEPENDENCY_KIND_LENGTH,
+        )
         _bounded_string(self.identity, "dependency identity")
         _check_digest(self.digest, "dependency digest")
         if not isinstance(self.required, bool):

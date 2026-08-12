@@ -84,6 +84,8 @@ def parse_object(data: bytes | str) -> dict[str, Any]:
 def check_unicode(value: Any) -> None:
     if isinstance(value, str):
         value.encode("utf-8")
+        if any(char in "\u2028\u2029" for char in value):
+            raise ValueError("prohibited line-separator code point")
     elif isinstance(value, dict):
         if len(value) > MAX_JSON_COLLECTION:
             raise ValueError("JSON object exceeds bound")
@@ -103,15 +105,20 @@ def normalize(value: Any) -> Any:
             value.encode("utf-8")
         except UnicodeEncodeError as exc:
             raise ValueError("invalid Unicode scalar") from exc
+        if any(char in "\u2028\u2029" for char in value):
+            raise ValueError("prohibited line-separator code point")
         return unicodedata.normalize("NFC", value)
     if isinstance(value, bool) or value is None:
         return value
     if isinstance(value, int | float):
         raise TypeError("numbers are not canonicalizable")
     if isinstance(value, dict):
-        normalized = {
-            unicodedata.normalize("NFC", key): normalize(item) for key, item in value.items()
-        }
+        normalized = {}
+        for key, item in value.items():
+            normalized_key = unicodedata.normalize("NFC", key)
+            if any(char in "\u2028\u2029" for char in normalized_key):
+                raise ValueError("prohibited line-separator code point")
+            normalized[normalized_key] = normalize(item)
         if len(normalized) != len(value):
             raise ValueError("canonical key collision")
         return dict(sorted(normalized.items(), key=lambda item: item[0].encode("utf-8")))

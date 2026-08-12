@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from jsonschema import Draft202012Validator
+import pytest
+from jsonschema import Draft202012Validator, ValidationError
 from referencing import Registry, Resource
 
 
@@ -34,8 +35,12 @@ def test_schemas_validate_the_base_protocol_documents() -> None:
     Draft202012Validator.check_schema(decision)
     Draft202012Validator(action).validate(vectors["base"]["action"])
     registry = Registry().with_resource(
-        "https://oncefold.dev/schemas/reuse-receipt/action-identity.schema.json",
+        "https://oncefold.dev/schemas/action-identity/1",
         Resource.from_contents(action),
     )
     Draft202012Validator(receipt, registry=registry).validate(vectors["base"]["receipt"])
     Draft202012Validator(decision).validate({"state": "UNKNOWN", "reason": "schema test"})
+    incomplete_action = dict(vectors["base"]["action"])
+    del incomplete_action["dependency_completeness"]
+    with pytest.raises(ValidationError):
+        Draft202012Validator(action).validate(incomplete_action)

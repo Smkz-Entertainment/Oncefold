@@ -19,6 +19,10 @@ The reference `oncefold.mcp_shadow` adapter shows the boundary:
 4. evaluate a later equivalent action against the stored receipt; and
 5. report the decision and result comparison as local shadow metadata.
 
+The adapter defaults `dependency_completeness` to `false`; a caller must pass
+`true` explicitly after independently establishing that its dependency set is
+complete. The same rule applies to the CLI and all other consumers.
+
 The adapter's verifier has no trusted producer by default. A caller that wants
 an authoritative `REUSABLE_EXACT` observation must pass a
 `ReceiptTrustPolicy` binding the expected MCP producer and cache scope. Numeric

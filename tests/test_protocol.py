@@ -34,6 +34,7 @@ def make_action(**changes: object) -> ActionIdentity:
         "side_effect_class": SideEffectClass.READ_ONLY,
         "authorization_scope_digest": digest("read:catalog"),
         "freshness": {"time_bucket": "2026-08-11T12"},
+        "dependency_completeness": True,
         "validator_identity": "validator/1",
     }
     values.update(changes)

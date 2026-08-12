@@ -94,6 +94,8 @@
     {"id": "duplicate-key", "json": "{\"trust_scope\":\"tenant:one\",\"trust_scope\":\"tenant:two\"}", "accepted": false},
     {"id": "number-input", "json": "{\"value\":1}", "accepted": false},
     {"id": "unpaired-surrogate", "json": "{\"value\":\"\\ud800\"}", "accepted": false},
+    {"id": "line-separator", "json": "{\"value\":\"\\u2028\"}", "accepted": false},
+    {"id": "paragraph-separator", "json": "{\"value\":\"\\u2029\"}", "accepted": false},
     {"id": "valid-object", "json": "{\"value\":\"ok\"}", "accepted": true}
   ],
   "cases": [

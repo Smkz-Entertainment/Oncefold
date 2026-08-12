@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Protocol, cast
 
 from oncefold.identity import (
@@ -29,7 +30,13 @@ _MAX_COLLECTION = MAX_COLLECTION_LENGTH
 _MISSING = object()
 
 
-def _bounded_text(value: object, field_name: str, *, required: bool = True) -> str:
+def _bounded_text(
+    value: object,
+    field_name: str,
+    *,
+    required: bool = True,
+    max_length: int = _MAX_STRING,
+) -> str:
     if not isinstance(value, str):
         raise TypeError(f"{field_name} must be a string")
     text = value
@@ -39,7 +46,9 @@ def _bounded_text(value: object, field_name: str, *, required: bool = True) -> s
         text.encode("utf-8")
     except UnicodeEncodeError as exc:
         raise ValueError(f"{field_name} contains an invalid Unicode scalar") from exc
-    if len(text) > _MAX_STRING or any(ord(char) < 0x20 for char in text):
+    if any(char in "\u2028\u2029" for char in text):
+        raise ValueError(f"{field_name} contains a prohibited line-separator code point")
+    if len(text) > max_length or any(ord(char) < 0x20 for char in text):
         raise ValueError(f"{field_name} is invalid or exceeds the canonical bound")
     return text
 
@@ -71,18 +80,20 @@ def _strict_keys(
         raise ValueError(f"{object_name} contains unknown fields: {sorted(unknown)}")
 
 
-def _string_mapping(value: Mapping[str, Any], field_name: str) -> dict[str, str]:
+def _string_mapping(value: Mapping[str, Any], field_name: str) -> Mapping[str, str]:
     if not isinstance(value, Mapping):
         raise TypeError(f"{field_name} must be an object")
     if len(value) > _MAX_COLLECTION:
         raise ValueError(f"{field_name} exceeds the collection bound")
-    return dict(
-        sorted(
-            (
-                _bounded_text(key, f"{field_name} key"),
-                _bounded_text(item, f"{field_name} value"),
+    return MappingProxyType(
+        dict(
+            sorted(
+                (
+                    _bounded_text(key, f"{field_name} key"),
+                    _bounded_text(item, f"{field_name} value"),
+                )
+                for key, item in value.items()
             )
-            for key, item in value.items()
         )
     )
 
@@ -92,7 +103,7 @@ def _dependency(value: Mapping[str, Any]) -> DependencyDescriptor:
         raise TypeError("dependency must be an object")
     _strict_keys(value, {"kind", "identity", "digest"}, {"required"}, "dependency")
     return DependencyDescriptor(
-        kind=_bounded_text(value["kind"], "dependency kind"),
+        kind=_bounded_text(value["kind"], "dependency kind", max_length=128),
         identity=_bounded_text(value["identity"], "dependency identity"),
         digest=_bounded_text(value["digest"], "dependency digest"),
         required=_boolean(value.get("required", _MISSING), "dependency.required", default=True),
@@ -134,7 +145,7 @@ class ActionIdentity:
     side_effect_class: SideEffectClass = SideEffectClass.UNKNOWN
     authorization_scope_digest: str | None = None
     freshness: Mapping[str, str] = field(default_factory=dict)
-    dependency_completeness: bool = True
+    dependency_completeness: bool = False
     validator_identity: str | None = None
     schema_version: str = _ACTION_SCHEMA
 
@@ -206,7 +217,13 @@ class ActionIdentity:
             raise TypeError("action identity must be an object")
         _strict_keys(
             value,
-            {"schema_version", "operation_identity", "operation_version", "input_digest"},
+            {
+                "schema_version",
+                "operation_identity",
+                "operation_version",
+                "input_digest",
+                "dependency_completeness",
+            },
             {
                 "trust_scope",
                 "environment",
@@ -214,7 +231,6 @@ class ActionIdentity:
                 "side_effect_class",
                 "authorization_scope_digest",
                 "freshness",
-                "dependency_completeness",
                 "validator_identity",
             },
             "action identity",
@@ -239,9 +255,9 @@ class ActionIdentity:
                 cast(Mapping[str, Any], value.get("freshness", {})), "freshness"
             ),
             dependency_completeness=_boolean(
-                value.get("dependency_completeness", _MISSING),
+                value["dependency_completeness"],
                 "dependency_completeness",
-                default=True,
+                default=False,
             ),
             validator_identity=_optional_text(
                 value.get("validator_identity"), "validator_identity"
@@ -460,7 +476,13 @@ class InMemoryReceiptStore:
         self._receipts[receipt.digest] = receipt
 
     def get(self, receipt_digest: str) -> ReuseReceipt | None:
-        return self._receipts.get(receipt_digest)
+        receipt = self._receipts.get(receipt_digest)
+        if receipt is None:
+            return None
+        try:
+            return receipt if receipt.digest == receipt_digest else None
+        except Exception:
+            return None
 
     def is_revoked(self, receipt_digest: str) -> bool:
         return receipt_digest in self._revoked

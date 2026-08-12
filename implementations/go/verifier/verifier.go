@@ -32,6 +32,10 @@ const (
 	maxJSONDepth = 32
 )
 
+func containsForbiddenCodePoint(value string) bool {
+	return strings.ContainsRune(value, '\u2028') || strings.ContainsRune(value, '\u2029')
+}
+
 type Action struct {
 	Raw                      map[string]any
 	Digest                   string
@@ -106,6 +110,9 @@ func normalize(value any, depth int) (any, error) {
 		if !utf8.ValidString(typed) {
 			return nil, fmt.Errorf("canonical string is not valid UTF-8")
 		}
+		if containsForbiddenCodePoint(typed) {
+			return nil, fmt.Errorf("canonical string contains a prohibited line-separator code point")
+		}
 		if utf8.RuneCountInString(typed) > 4096 {
 			return nil, fmt.Errorf("canonical string exceeds bound")
 		}
@@ -137,6 +144,9 @@ func normalize(value any, depth int) (any, error) {
 		result := make(map[string]any, len(typed))
 		for key, item := range typed {
 			cleanKey := norm.NFC.String(key)
+			if containsForbiddenCodePoint(cleanKey) {
+				return nil, fmt.Errorf("canonical object key contains a prohibited line-separator code point")
+			}
 			if _, exists := result[cleanKey]; exists {
 				return nil, fmt.Errorf("canonical key collision")
 			}
@@ -248,6 +258,9 @@ func decodeValue(decoder *json.Decoder, depth int) (any, error) {
 				if !ok {
 					return nil, fmt.Errorf("JSON object key must be a string")
 				}
+				if containsForbiddenCodePoint(key) {
+					return nil, fmt.Errorf("JSON object key contains a prohibited line-separator code point")
+				}
 				if _, exists := result[key]; exists {
 					return nil, fmt.Errorf("duplicate JSON object key: %s", key)
 				}
@@ -287,7 +300,12 @@ func decodeValue(decoder *json.Decoder, depth int) (any, error) {
 		}
 	case json.Number:
 		return nil, fmt.Errorf("numbers are not accepted in Oncefold JSON ingress")
-	case string, bool, nil:
+	case string:
+		if containsForbiddenCodePoint(typed) {
+			return nil, fmt.Errorf("JSON string contains a prohibited line-separator code point")
+		}
+		return typed, nil
+	case bool, nil:
 		return typed, nil
 	default:
 		return nil, fmt.Errorf("unsupported JSON value %T", token)
@@ -342,12 +360,16 @@ func allowed(value map[string]any, required, optional []string, name string) err
 	return nil
 }
 
-func stringValue(value any, name string, optional bool) (string, *string, error) {
+func stringValue(value any, name string, optional bool, maxLengths ...int) (string, *string, error) {
 	if value == nil && optional {
 		return "", nil, nil
 	}
 	text, ok := value.(string)
-	if !ok || (!optional && text == "") || !utf8.ValidString(text) || utf8.RuneCountInString(text) > 4096 {
+	maxLength := 4096
+	if len(maxLengths) > 0 {
+		maxLength = maxLengths[0]
+	}
+	if !ok || (!optional && text == "") || !utf8.ValidString(text) || containsForbiddenCodePoint(text) || utf8.RuneCountInString(text) > maxLength {
 		return "", nil, fmt.Errorf("%s must be a bounded string", name)
 	}
 	for _, character := range text {
@@ -393,7 +415,7 @@ func parseDependency(value any) (map[string]any, error) {
 	if err := allowed(source, []string{"kind", "identity", "digest"}, []string{"required"}, "dependency"); err != nil {
 		return nil, err
 	}
-	kind, _, err := stringValue(source["kind"], "dependency.kind", false)
+	kind, _, err := stringValue(source["kind"], "dependency.kind", false, 128)
 	if err != nil {
 		return nil, err
 	}
@@ -513,7 +535,7 @@ func admits(receipt Receipt, policy TrustPolicy) bool {
 }
 
 func ParseAction(source map[string]any) (Action, error) {
-	if err := allowed(source, []string{"schema_version", "operation_identity", "operation_version", "input_digest"}, []string{"trust_scope", "environment", "dependencies", "side_effect_class", "authorization_scope_digest", "freshness", "dependency_completeness", "validator_identity"}, "action identity"); err != nil {
+	if err := allowed(source, []string{"schema_version", "operation_identity", "operation_version", "input_digest", "dependency_completeness"}, []string{"trust_scope", "environment", "dependencies", "side_effect_class", "authorization_scope_digest", "freshness", "validator_identity"}, "action identity"); err != nil {
 		return Action{}, err
 	}
 	schema, _, err := stringValue(source["schema_version"], "schema_version", false)
@@ -578,7 +600,7 @@ func ParseAction(source map[string]any) (Action, error) {
 	if err != nil {
 		return Action{}, err
 	}
-	complete := true
+	complete := false
 	if raw, exists := source["dependency_completeness"]; exists {
 		var ok bool
 		complete, ok = raw.(bool)

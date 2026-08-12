@@ -12,6 +12,10 @@ Oncefold is deliberately narrower than a cache or agent platform.
   it; a valid digest alone cannot authorize reuse.
 - The canonicalizer rejects JSON numbers and requires callers to define a
   separate input-digest contract for numeric external inputs.
+- The canonicalizer rejects U+2028 and U+2029 line-separator code points to
+  preserve byte parity across the reference implementations.
+- `dependency_completeness` must be explicitly supplied on the wire; omission
+  is malformed and programmatic actions default to incomplete.
 - Protocol JSON ingress is bounded and rejects duplicate keys, excessive
   nesting, non-standard constants, and invalid Unicode scalar sequences.
 - It does not prove tenant isolation or protect a compromised host.

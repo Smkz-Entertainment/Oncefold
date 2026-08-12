@@ -26,6 +26,7 @@ def main() -> None:
         input_digest=digest("example-cli-input"),
         trust_scope="example:public",
         side_effect_class=SideEffectClass.READ_ONLY,
+        dependency_completeness=True,
     )
     receipt = ReuseReceipt(
         action=action,

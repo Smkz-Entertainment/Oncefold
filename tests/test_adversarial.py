@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -30,6 +31,7 @@ def action(**changes: object) -> ActionIdentity:
         "input_digest": digest("input"),
         "dependencies": (DependencyDescriptor("file", "config", digest("v1")),),
         "side_effect_class": SideEffectClass.READ_ONLY,
+        "dependency_completeness": True,
     }
     values.update(changes)
     return ActionIdentity(**values)  # type: ignore[arg-type]
@@ -94,7 +96,7 @@ def test_external_mutation_and_incomplete_dependencies_are_not_reusable() -> Non
     )
 
 
-def test_sqlite_revocation_is_not_lost_and_can_precede_publication(tmp_path) -> None:
+def test_sqlite_revocation_is_not_lost_and_can_precede_publication(tmp_path: Path) -> None:
     current = action()
     stored = receipt(current)
     store = SQLiteReceiptStore(tmp_path / "receipts.sqlite3")
@@ -136,3 +138,30 @@ def test_validator_exceptions_and_non_boolean_results_fail_closed() -> None:
     assert raises.state.value == "UNKNOWN"
     malformed = verifier.evaluate(current, stored, validator=lambda _: "pass")
     assert malformed.state.value == "UNKNOWN"
+
+
+def test_protocol_mappings_are_immutable_and_store_checks_digest_key() -> None:
+    current = action()
+    stored = receipt(current)
+    with pytest.raises(TypeError):
+        current.environment["unexpected"] = "mutation"  # type: ignore[index]
+    with pytest.raises(TypeError):
+        stored.provenance["unexpected"] = "mutation"  # type: ignore[index]
+
+    store = InMemoryReceiptStore()
+    store.put(stored)
+    store._receipts[stored.digest] = replace(stored, result_digest=digest("tampered"))
+    assert store.get(stored.digest) is None
+
+
+def test_dependency_completeness_defaults_incomplete_and_is_required_on_wire() -> None:
+    incomplete = ActionIdentity(
+        operation_identity="example.read",
+        operation_version="1",
+        input_digest=digest("input"),
+    )
+    assert incomplete.dependency_completeness is False
+    payload = incomplete.as_dict()
+    del payload["dependency_completeness"]
+    with pytest.raises(ValueError, match="missing required"):
+        ActionIdentity.from_dict(payload)

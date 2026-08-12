@@ -100,6 +100,27 @@ for (const item of document.cases) {
   if (actual !== item.expected_state) failures.push(`${item.id}: expected ${item.expected_state}, got ${actual}`);
 }
 
+try {
+  const verifiedPayload = materializeReceipt(
+    document.base.receipt,
+    { reuse_class: "VERIFIED" } as Record<string, JsonValue>,
+    true,
+  );
+  const verifiedAction = parseAction(document.base.action);
+  const verifiedReceipt = parseReceipt(verifiedPayload);
+  const nonBooleanValidator = evaluate(verifiedAction, verifiedReceipt, {
+    validatorResult: "pass",
+    trustPolicy: {
+      allowedProducers: document.trust_policy.allowed_producers,
+      allowedCacheScopes: document.trust_policy.allowed_cache_scopes,
+      requiredProvenance: document.trust_policy.required_provenance,
+    },
+  });
+  if (nonBooleanValidator.state !== "UNKNOWN") failures.push("validator result: non-boolean value was accepted");
+} catch {
+  failures.push("validator result: runtime type-check fixture failed");
+}
+
 const output = {
   implementation: "typescript-independent",
   total: document.cases.length,

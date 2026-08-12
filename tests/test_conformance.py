@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -78,12 +79,18 @@ def test_all_conformance_vectors_fail_closed_or_match_expected_state() -> None:
             store.put(receipt)
             if case.get("revoked"):
                 store.revoke(receipt.digest, "vector revocation")
+            validator: Callable[[ReuseReceipt], object] | None = None
+            if "validator_result" in case:
+                result = case["validator_result"]
+
+                def fixed_validator(_: ReuseReceipt, expected: object = result) -> object:
+                    return bool(expected)
+
+                validator = fixed_validator
             decision = ReceiptVerifier(store, trust_policy(document)).evaluate(
                 action,
                 receipt,
-                validator=(lambda _, result=case["validator_result"]: bool(result))
-                if "validator_result" in case
-                else None,
+                validator=validator,
                 available_result_digest=case.get("available_result_digest"),
             )
         except (TypeError, ValueError, KeyError):
@@ -106,7 +113,7 @@ def test_cli_producer_receipt_is_consumable_by_python_verifier(tmp_path: Path) -
     store.put(receipt)
     decision = ReceiptVerifier(
         store,
-        ReceiptTrustPolicy.for_producer(receipt.producer_identity, receipt.cache_scope),
+        ReceiptTrustPolicy.for_producer("generic-cli-producer", "private"),
     ).evaluate(receipt.action, receipt)
     assert decision.state is DecisionState.REUSABLE_EXACT
     consumed = subprocess.run(
@@ -127,6 +134,8 @@ def test_cli_producer_receipt_is_consumable_by_python_verifier(tmp_path: Path) -
     )
     assert inspected.returncode == 0
     assert '"state": "UNKNOWN"' in inspected.stdout
+    action_path = tmp_path / "current-action.json"
+    action_path.write_text(json.dumps(receipt.action.as_dict(), sort_keys=True), encoding="utf-8")
     unchecked = subprocess.run(
         [sys.executable, "-m", "oncefold", "check", str(receipt_path)],
         check=False,
@@ -134,7 +143,7 @@ def test_cli_producer_receipt_is_consumable_by_python_verifier(tmp_path: Path) -
         text=True,
         env=SOURCE_ENV,
     )
-    assert unchecked.returncode == 1
+    assert unchecked.returncode == 2
     checked = subprocess.run(
         [
             sys.executable,
@@ -142,6 +151,8 @@ def test_cli_producer_receipt_is_consumable_by_python_verifier(tmp_path: Path) -
             "oncefold",
             "verify",
             str(receipt_path),
+            "--action",
+            str(action_path),
             "--trusted-producer",
             "generic-cli-producer",
             "--trusted-cache-scope",

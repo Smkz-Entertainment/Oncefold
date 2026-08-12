@@ -41,6 +41,7 @@ action = ActionIdentity(
     input_digest=digest("catalog.lookup:input"),
     trust_scope="tenant:one",
     side_effect_class=SideEffectClass.READ_ONLY,
+    dependency_completeness=True,
 )
 receipt = ReuseReceipt(
     action=action,
@@ -83,12 +84,15 @@ reuse requires explicit producer and cache-scope trust flags:
 
 ```powershell
 oncefold inspect receipt.json
-oncefold check receipt.json --trusted-producer catalog-worker --trusted-cache-scope private
+oncefold check receipt.json --action current-action.json --trusted-producer catalog-worker --trusted-cache-scope private
 ```
 
 `inspect` reports any decision and exits zero after successful parsing.
 `check` and its compatibility alias `verify` exit zero only for trusted
-`REUSABLE_EXACT`; malformed input exits 2 and all other decisions exit 1.
+`REUSABLE_EXACT`; both gates require `--action` from independently observed
+current state. Malformed input or a missing gate action exits 2 and all other
+decisions exit 1. Example trust-policy values are consumer configuration and
+must never be copied from the receipt being evaluated.
 
 ## What Oncefold does and does not own
 

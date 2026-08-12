@@ -18,12 +18,17 @@ from oncefold.protocol import (
 from oncefold.wire import load_json_object
 
 
-def _add_evaluation_arguments(parser: argparse.ArgumentParser) -> None:
+def _add_evaluation_arguments(parser: argparse.ArgumentParser, *, action_required: bool) -> None:
     parser.add_argument("receipt", type=Path)
     parser.add_argument(
         "--action",
         type=Path,
-        help="JSON file containing current Action Identity; defaults to the receipt action",
+        required=action_required,
+        help=(
+            "JSON file containing the independently observed current Action Identity"
+            if action_required
+            else "JSON file containing current Action Identity; defaults to the receipt action"
+        ),
     )
     parser.add_argument("--result-digest", help="digest of the currently available result")
     parser.add_argument(
@@ -71,13 +76,13 @@ def main(argv: list[str] | None = None) -> int:
     inspect = subparsers.add_parser(
         "inspect", help="report a decision without using its exit status as a gate"
     )
-    _add_evaluation_arguments(inspect)
+    _add_evaluation_arguments(inspect, action_required=False)
     for name in ("check", "verify"):
         gate = subparsers.add_parser(
             name,
             help="report a decision and exit 0 only for trusted REUSABLE_EXACT evidence",
         )
-        _add_evaluation_arguments(gate)
+        _add_evaluation_arguments(gate, action_required=True)
     args = parser.parse_args(argv)
 
     try:
