@@ -3,7 +3,9 @@
   "canonicalization": {
     "decomposed": "cafe\u0301",
     "composed": "caf\u00e9",
-    "equivalent": true
+    "equivalent": true,
+    "utf8_key_order": {"\ue000": "bmp", "\ud800\udc00": "astral"},
+    "utf8_key_order_digest": "94065525f1ea09913315f5a3f2cb846d9dda91a016d4726a60b4d99a53e50788"
   },
   "base": {
     "action": {
@@ -51,7 +53,7 @@
       },
       "action_digest": "af5c729f80d81b7138e9f0bc385c55edd6f4dceefb36ba02756606ccdc6f7bd6",
       "cache_scope": "tenant-private",
-      "created_at": "2026-08-11T12:00:00+00:00",
+      "created_at": "2026-08-11T12:00:00Z",
       "dependency_snapshot": [
         {
           "digest": "8ca1021c45320463625b4afe10eba47281f771cd623f74229318a372b3b7d751",
@@ -65,7 +67,7 @@
       "media_type": "application/json",
       "producer_identity": "producer-a",
       "provenance": {"path": "cli"},
-      "receipt_digest": "9453e770ac93c7f8bc69d339e998a5147ffc72d7b9e39c992e83cca8377c9b0b",
+      "receipt_digest": "868cfe66789b467a97ff33e93fde66ffc4d2bba13ecaa6a7de61021b7652ade4",
       "result_digest": "f6a214f7a5fcda0c2cee9660b7fc29f5649e3c68aad48e20e950137c98913a68",
       "result_reference": null,
       "reuse_class": "EXACT",
@@ -75,6 +77,25 @@
       "validator_identity": "validator/1"
     }
   },
+  "trust_policy": {
+    "allowed_producers": ["producer-a"],
+    "allowed_cache_scopes": ["tenant-private"],
+    "required_provenance": {"path": "cli"}
+  },
+  "timestamp_cases": [
+    {"value": "2026-08-11T12:00:00Z", "accepted": true, "canonical": "2026-08-11T12:00:00Z"},
+    {"value": "2026-08-11T12:00:00.000000Z", "accepted": true, "canonical": "2026-08-11T12:00:00Z"},
+    {"value": "2026-08-11T12:00:00.123456Z", "accepted": true, "canonical": "2026-08-11T12:00:00.123456Z"},
+    {"value": "2026-08-11T14:00:00+02:00", "accepted": false},
+    {"value": "2026-02-30T12:00:00Z", "accepted": false},
+    {"value": "2026-08-11T12:00:00.123Z", "accepted": false}
+  ],
+  "raw_json_cases": [
+    {"id": "duplicate-key", "json": "{\"trust_scope\":\"tenant:one\",\"trust_scope\":\"tenant:two\"}", "accepted": false},
+    {"id": "number-input", "json": "{\"value\":1}", "accepted": false},
+    {"id": "unpaired-surrogate", "json": "{\"value\":\"\\ud800\"}", "accepted": false},
+    {"id": "valid-object", "json": "{\"value\":\"ok\"}", "accepted": true}
+  ],
   "cases": [
     {"id": "immutable-exact", "expected_state": "REUSABLE_EXACT"},
     {"id": "direct-dependency-changed", "action_patch": {"dependencies": [{"kind": "db", "identity": "catalog", "digest": "f1f773e798ac82b1f4818f8272d149def084d91bd81309d745ad7feec9c37121", "required": true}]}, "expected_state": "STALE"},
@@ -98,6 +119,9 @@
     {"id": "canonicalization-key-order", "notes": "Equivalent object key order must preserve the exact decision.", "expected_state": "REUSABLE_EXACT"},
     {"id": "unicode-nfc-equivalent", "notes": "NFC-equivalent strings must preserve the exact decision.", "expected_state": "REUSABLE_EXACT"},
     {"id": "unknown-action-field", "action_patch": {"unexpected": "reject"}, "expected_state": "UNKNOWN"},
+    {"id": "explicit-null-dependencies", "action_patch": {"dependencies": null}, "expected_state": "UNKNOWN"},
+    {"id": "explicit-null-environment", "action_patch": {"environment": null}, "expected_state": "UNKNOWN"},
+    {"id": "explicit-null-completeness", "action_patch": {"dependency_completeness": null}, "expected_state": "UNKNOWN"},
     {"id": "malformed-action-schema", "action_patch": {"schema_version": "oncefold.action/999"}, "expected_state": "UNKNOWN"},
     {"id": "malformed-input-digest", "action_patch": {"input_digest": "bad"}, "expected_state": "UNKNOWN"},
     {"id": "malformed-dependency-digest", "action_patch": {"dependencies": [{"kind": "db", "identity": "catalog", "digest": "bad", "required": true}]}, "expected_state": "UNKNOWN"},

@@ -6,6 +6,8 @@ It imports no Python code and is not presented as a full TypeScript SDK.
 From the repository root, with Node.js 22 or newer:
 
 ```powershell
+npm ci
+npm run typecheck
 node --experimental-strip-types implementations/typescript/run_conformance.ts conformance/vectors.json
 ```
 

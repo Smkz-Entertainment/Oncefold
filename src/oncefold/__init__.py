@@ -5,6 +5,7 @@ from oncefold.identity import (
     ReuseClass,
     SideEffectClass,
     canonical_json,
+    canonical_timestamp,
     sha256_digest,
 )
 from oncefold.protocol import (
@@ -12,11 +13,13 @@ from oncefold.protocol import (
     DecisionState,
     InMemoryReceiptStore,
     ReceiptStore,
+    ReceiptTrustPolicy,
     ReceiptVerifier,
     ReuseDecision,
     ReuseReceipt,
     SQLiteReceiptStore,
 )
+from oncefold.wire import MAX_JSON_BYTES, load_json_object, parse_json_object
 
 __all__ = [
     "ActionIdentity",
@@ -24,13 +27,18 @@ __all__ = [
     "DependencyDescriptor",
     "InMemoryReceiptStore",
     "ReceiptStore",
+    "ReceiptTrustPolicy",
     "ReceiptVerifier",
     "ReuseClass",
     "ReuseDecision",
     "ReuseReceipt",
     "SideEffectClass",
     "SQLiteReceiptStore",
+    "MAX_JSON_BYTES",
+    "canonical_timestamp",
     "canonical_json",
+    "load_json_object",
+    "parse_json_object",
     "sha256_digest",
 ]
 

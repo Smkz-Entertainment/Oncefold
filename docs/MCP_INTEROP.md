@@ -13,11 +13,17 @@ scope, side-effect class, and validator contract where relevant.
 
 The reference `oncefold.mcp_shadow` adapter shows the boundary:
 
-1. derive an action input digest from the bounded tool arguments;
+1. derive an action input digest from bounded, number-free tool arguments;
 2. forward the real call;
 3. record a receipt only for an ordinary successful read-only result;
 4. evaluate a later equivalent action against the stored receipt; and
 5. report the decision and result comparison as local shadow metadata.
+
+The adapter's verifier has no trusted producer by default. A caller that wants
+an authoritative `REUSABLE_EXACT` observation must pass a
+`ReceiptTrustPolicy` binding the expected MCP producer and cache scope. Numeric
+tool arguments are rejected by the canonicalizer rather than hashed with
+language-specific number rules.
 
 Every `forward` call executes the supplied tool. The adapter never suppresses a
 call, never turns a receipt into a cache hit, and never supplies idempotency for

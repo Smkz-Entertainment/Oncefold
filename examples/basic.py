@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from oncefold import (
     ActionIdentity,
     InMemoryReceiptStore,
+    ReceiptTrustPolicy,
     ReceiptVerifier,
     ReuseClass,
     ReuseReceipt,
@@ -39,5 +40,7 @@ receipt = ReuseReceipt(
 )
 store = InMemoryReceiptStore()
 store.put(receipt)
-decision = ReceiptVerifier(store).evaluate(action, receipt)
+decision = ReceiptVerifier(
+    store, ReceiptTrustPolicy.for_producer(receipt.producer_identity, receipt.cache_scope)
+).evaluate(action, receipt)
 print(json.dumps({"state": decision.state.value, "reason": decision.reason}, sort_keys=True))

@@ -5,7 +5,7 @@
  */
 import { createHash } from "node:crypto";
 
-export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+export type JsonValue = null | boolean | string | JsonValue[] | { [key: string]: JsonValue };
 export type DecisionState =
   | "REUSABLE_EXACT"
   | "REQUIRES_VALIDATION"
@@ -19,8 +19,11 @@ export type DecisionState =
 const ACTION_SCHEMA = "oncefold.action/1";
 const RECEIPT_SCHEMA = "oncefold.receipt/1";
 const DIGEST = /^[0-9a-f]{64}$/;
+const TIMESTAMP = /^[1-9][0-9]{3}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{6})?Z$/;
 const SIDE_EFFECTS = new Set(["READ_ONLY", "LOCAL_WRITE", "EXTERNAL_MUTATION", "UNKNOWN"]);
 const REUSE_CLASSES = new Set(["EXACT", "VERIFIED", "ADVISORY", "UNSAFE"]);
+const MAX_JSON_BYTES = 1_048_576;
+const MAX_JSON_DEPTH = 32;
 
 export type Action = {
   raw: Record<string, JsonValue>;
@@ -41,8 +44,11 @@ export type Receipt = {
   digest: string;
   action: Action;
   resultDigest: string;
+  producerIdentity: string;
   reuseClass: string;
   trustScope: string;
+  cacheScope: string;
+  provenance: Record<string, JsonValue>;
   revocationRef: string | null;
   validatorIdentity: string | null;
   dependencySnapshot: Record<string, JsonValue>[];
@@ -50,8 +56,27 @@ export type Receipt = {
 
 export type Decision = { state: DecisionState; reason: string; receiptDigest?: string };
 
+export type TrustPolicy = {
+  allowedProducers: readonly string[];
+  allowedCacheScopes: readonly string[];
+  requiredProvenance?: Record<string, string>;
+};
+
 function fail(message: string): never {
   throw new Error(message);
+}
+
+function assertWellFormed(value: string, name: string): void {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (Number.isNaN(next) || next < 0xdc00 || next > 0xdfff) fail(`${name} contains an invalid Unicode scalar`);
+      index += 1;
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      fail(`${name} contains an invalid Unicode scalar`);
+    }
+  }
 }
 
 function object(value: unknown, name: string): Record<string, unknown> {
@@ -62,6 +87,7 @@ function object(value: unknown, name: string): Record<string, unknown> {
 function text(value: unknown, name: string, optional = false): string | null {
   if (value === null && optional) return null;
   if (typeof value !== "string" || (!optional && value.length === 0)) fail(`${name} must be a string`);
+  assertWellFormed(value, name);
   if ([...value].length > 4096 || [...value].some((char) => char.codePointAt(0)! < 0x20)) {
     fail(`${name} exceeds canonical bounds`);
   }
@@ -83,13 +109,15 @@ function allowed(value: Record<string, unknown>, required: string[], optional: s
 function normalize(value: unknown, depth = 0): JsonValue {
   if (depth > 16) fail("canonical value is too deeply nested");
   if (value === null || typeof value === "boolean" || typeof value === "string") {
-    if (typeof value === "string") text(value, "canonical string");
+    if (typeof value === "string") {
+      assertWellFormed(value, "canonical string");
+      if ([...value].length > 4096 || [...value].some((char) => char.codePointAt(0)! < 0x20)) {
+        fail("canonical string exceeds bounds");
+      }
+    }
     return typeof value === "string" ? value.normalize("NFC") : value;
   }
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) fail("non-finite number");
-    return value;
-  }
+  if (typeof value === "number") fail("numbers are not canonicalizable; supply an opaque input digest");
   if (Array.isArray(value)) {
     if (value.length > 256) fail("canonical array exceeds bound");
     return value.map((item) => normalize(item, depth + 1));
@@ -98,10 +126,13 @@ function normalize(value: unknown, depth = 0): JsonValue {
   if (Object.keys(source).length > 256) fail("canonical object exceeds bound");
   const entries = Object.entries(source).map(([key, item]) => {
     const normalizedKey = key.normalize("NFC");
-    text(normalizedKey, "canonical object key");
+    assertWellFormed(normalizedKey, "canonical object key");
+    if ([...normalizedKey].length > 4096 || [...normalizedKey].some((char) => char.codePointAt(0)! < 0x20)) {
+      fail("canonical object key exceeds bounds");
+    }
     return [normalizedKey, normalize(item, depth + 1)] as const;
   });
-  entries.sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
+  entries.sort(([left], [right]) => compareUtf8(left, right));
   const result: Record<string, JsonValue> = {};
   for (let index = 0; index < entries.length; index += 1) {
     if (index > 0 && entries[index - 1][0] === entries[index][0]) fail("canonical key collision");
@@ -111,9 +142,161 @@ function normalize(value: unknown, depth = 0): JsonValue {
 }
 
 export function canonicalJson(value: unknown): string {
-  const encoded = JSON.stringify(normalize(value));
-  if (encoded === undefined) fail("value is not JSON-compatible");
-  return encoded;
+  return encodeCanonical(normalize(value));
+}
+
+function compareUtf8(left: string, right: string): number {
+  const leftBytes = new TextEncoder().encode(left);
+  const rightBytes = new TextEncoder().encode(right);
+  const length = Math.min(leftBytes.length, rightBytes.length);
+  for (let index = 0; index < length; index += 1) {
+    if (leftBytes[index] !== rightBytes[index]) return leftBytes[index] - rightBytes[index];
+  }
+  return leftBytes.length - rightBytes.length;
+}
+
+function encodeCanonical(value: JsonValue): string {
+  if (value === null || typeof value === "boolean" || typeof value === "string") {
+    return JSON.stringify(value)!;
+  }
+  if (Array.isArray(value)) return `[${value.map(encodeCanonical).join(",")}]`;
+  const entries = Object.entries(value).sort(([left], [right]) => compareUtf8(left, right));
+  return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${encodeCanonical(item)}`).join(",")}}`;
+}
+
+export function canonicalTimestamp(value: unknown): string {
+  const createdAt = text(value, "created_at")!;
+  if (!TIMESTAMP.test(createdAt)) fail("created_at must be RFC 3339 UTC with Z and optional six-digit fractions");
+  const base = `${createdAt.slice(0, 19)}Z`;
+  const parsed = Date.parse(base);
+  if (Number.isNaN(parsed) || new Date(parsed).toISOString().slice(0, 19) !== base.slice(0, 19)) {
+    fail("created_at is not a valid timestamp");
+  }
+  const fraction = createdAt.length > 20 ? createdAt.slice(20, 26) : "";
+  return fraction !== "" && !/^0{6}$/.test(fraction) ? `${base.slice(0, 19)}.${fraction}Z` : base;
+}
+
+class JsonParser {
+  private position = 0;
+  private readonly source: string;
+
+  constructor(source: string) {
+    this.source = source;
+  }
+
+  parseObject(): Record<string, JsonValue> {
+    const value = this.parseValue(0);
+    this.skipWhitespace();
+    if (this.position !== this.source.length) fail("trailing JSON input");
+    if (value === null || typeof value !== "object" || Array.isArray(value)) fail("JSON document must be an object");
+    return value as Record<string, JsonValue>;
+  }
+
+  private parseValue(depth: number): JsonValue {
+    if (depth > MAX_JSON_DEPTH) fail("JSON nesting exceeds the input bound");
+    this.skipWhitespace();
+    const character = this.source[this.position];
+    if (character === "{") return this.parseObjectValue(depth + 1);
+    if (character === "[") return this.parseArrayValue(depth + 1);
+    if (character === '"') return this.parseString();
+    if (this.source.startsWith("true", this.position)) {
+      this.position += 4;
+      return true;
+    }
+    if (this.source.startsWith("false", this.position)) {
+      this.position += 5;
+      return false;
+    }
+    if (this.source.startsWith("null", this.position)) {
+      this.position += 4;
+      return null;
+    }
+    if (character === "-" || (character >= "0" && character <= "9")) {
+      fail("numbers are not accepted in Oncefold JSON ingress");
+    }
+    fail("invalid JSON value");
+  }
+
+  private parseObjectValue(depth: number): Record<string, JsonValue> {
+    this.position += 1;
+    const result: Record<string, JsonValue> = Object.create(null) as Record<string, JsonValue>;
+    this.skipWhitespace();
+    if (this.take("}")) return result;
+    while (true) {
+      this.skipWhitespace();
+      if (this.source[this.position] !== '"') fail("JSON object keys must be strings");
+      const key = this.parseString();
+      if (Object.prototype.hasOwnProperty.call(result, key)) fail(`duplicate JSON object key: ${key}`);
+      this.skipWhitespace();
+      if (!this.take(":")) fail("expected colon after JSON object key");
+      result[key] = this.parseValue(depth);
+      if (Object.keys(result).length > 256) fail("JSON object exceeds the input bound");
+      this.skipWhitespace();
+      if (this.take("}")) return result;
+      if (!this.take(",")) fail("expected comma in JSON object");
+    }
+  }
+
+  private parseArrayValue(depth: number): JsonValue[] {
+    this.position += 1;
+    const result: JsonValue[] = [];
+    this.skipWhitespace();
+    if (this.take("]")) return result;
+    while (true) {
+      result.push(this.parseValue(depth));
+      if (result.length > 256) fail("JSON array exceeds the input bound");
+      this.skipWhitespace();
+      if (this.take("]")) return result;
+      if (!this.take(",")) fail("expected comma in JSON array");
+    }
+  }
+
+  private parseString(): string {
+    const start = this.position;
+    this.position += 1;
+    let escaped = false;
+    while (this.position < this.source.length) {
+      const character = this.source[this.position];
+      if (escaped) {
+        escaped = false;
+        this.position += 1;
+        continue;
+      }
+      if (character === "\\") {
+        escaped = true;
+        this.position += 1;
+        continue;
+      }
+      if (character === '"') {
+        this.position += 1;
+        const value = JSON.parse(this.source.slice(start, this.position)) as unknown;
+        if (typeof value !== "string") fail("invalid JSON string");
+        assertWellFormed(value, "JSON string");
+        return value;
+      }
+      this.position += 1;
+    }
+    fail("unterminated JSON string");
+  }
+
+  private skipWhitespace(): void {
+    while (this.position < this.source.length && /[\u0020\u0009\u000a\u000d]/.test(this.source[this.position])) {
+      this.position += 1;
+    }
+  }
+
+  private take(expected: string): boolean {
+    if (this.source.startsWith(expected, this.position)) {
+      this.position += expected.length;
+      return true;
+    }
+    return false;
+  }
+}
+
+export function parseJsonObject(source: string): Record<string, JsonValue> {
+  if (new TextEncoder().encode(source).length > MAX_JSON_BYTES) fail(`JSON input exceeds ${MAX_JSON_BYTES} bytes`);
+  return new JsonParser(source).parseObject();
 }
 
 export function sha256(value: string): string {
@@ -153,7 +336,13 @@ function dependencies(value: unknown, name: string): Record<string, JsonValue>[]
     if (ids.has(id)) fail(`${name} contains duplicate dependency identity`);
     ids.add(id);
   }
-  parsed.sort((left, right) => `${left.kind}:${left.identity}:${left.digest}`.localeCompare(`${right.kind}:${right.identity}:${right.digest}`));
+  parsed.sort((left, right) => {
+    for (const key of ["kind", "identity", "digest"] as const) {
+      const difference = compareUtf8(String(left[key]), String(right[key]));
+      if (difference !== 0) return difference;
+    }
+    return 0;
+  });
   return parsed;
 }
 
@@ -165,10 +354,10 @@ export function parseAction(value: unknown): Action {
   const operationIdentity = text(source.operation_identity, "operation_identity")!;
   const operationVersion = text(source.operation_version, "operation_version")!;
   const inputDigest = digest(source.input_digest, "input_digest");
-  const trustScope = text(source.trust_scope ?? "local", "trust_scope")!;
+  const trustScope = text(source.trust_scope === undefined ? "local" : source.trust_scope, "trust_scope")!;
   const environment = stringMap(source.environment, "environment");
   const parsedDependencies = dependencies(source.dependencies === undefined ? [] : source.dependencies, "dependencies");
-  const sideEffectClass = text(source.side_effect_class ?? "UNKNOWN", "side_effect_class")!;
+  const sideEffectClass = text(source.side_effect_class === undefined ? "UNKNOWN" : source.side_effect_class, "side_effect_class")!;
   if (!SIDE_EFFECTS.has(sideEffectClass)) fail("unknown side effect class");
   const authorizationScopeDigest = source.authorization_scope_digest === undefined ? null : source.authorization_scope_digest === null ? null : digest(source.authorization_scope_digest, "authorization_scope_digest");
   const freshness = stringMap(source.freshness, "freshness");
@@ -204,8 +393,7 @@ export function parseReceipt(value: unknown, allowMissingDigest = false): Receip
   const resultDigest = digest(source.result_digest, "result_digest");
   const reuseClass = text(source.reuse_class, "reuse_class")!;
   if (!REUSE_CLASSES.has(reuseClass)) fail("unknown reuse class");
-  const createdAt = text(source.created_at, "created_at")!;
-  if (!/[zZ]|[+-][0-9]{2}:[0-9]{2}$/.test(createdAt) || Number.isNaN(Date.parse(createdAt))) fail("created_at must be a timezone-aware timestamp");
+  const createdAt = canonicalTimestamp(source.created_at);
   const snapshot = dependencies(source.dependency_snapshot, "dependency_snapshot");
   const trustScope = text(source.trust_scope, "trust_scope")!;
   const cacheScope = text(source.cache_scope, "cache_scope")!;
@@ -236,10 +424,16 @@ export function parseReceipt(value: unknown, allowMissingDigest = false): Receip
   };
   const receiptDigest = sha256(canonicalJson(raw));
   if (!allowMissingDigest && digest(source.receipt_digest, "receipt_digest") !== receiptDigest) fail("receipt digest mismatch");
-  return { raw, digest: receiptDigest, action, resultDigest, reuseClass, trustScope, revocationRef, validatorIdentity, dependencySnapshot: snapshot };
+  return { raw, digest: receiptDigest, action, resultDigest, producerIdentity: text(source.producer_identity, "producer_identity")!, reuseClass, trustScope, cacheScope, provenance, revocationRef, validatorIdentity, dependencySnapshot: snapshot };
 }
 
-export function evaluate(action: Action, receipt: Receipt, options: { revoked?: boolean; availableResultDigest?: string; validatorResult?: boolean } = {}): Decision {
+function admits(receipt: Receipt, policy: TrustPolicy | undefined): boolean {
+  if (policy === undefined || !policy.allowedProducers.includes(receipt.producerIdentity)) return false;
+  if (!policy.allowedCacheScopes.includes(receipt.cacheScope)) return false;
+  return Object.entries(policy.requiredProvenance ?? {}).every(([key, value]) => receipt.provenance[key] === value);
+}
+
+export function evaluate(action: Action, receipt: Receipt, options: { revoked?: boolean; availableResultDigest?: string; validatorResult?: boolean; trustPolicy?: TrustPolicy } = {}): Decision {
   const receiptDigest = receipt.digest;
   if (options.revoked || receipt.revocationRef !== null) return { state: "REVOKED", reason: "receipt revoked", receiptDigest };
   if (action.trustScope !== receipt.trustScope || action.trustScope !== receipt.action.trustScope || action.authorizationScopeDigest !== receipt.action.authorizationScopeDigest) return { state: "SCOPE_MISMATCH", reason: "scope mismatch", receiptDigest };
@@ -249,8 +443,12 @@ export function evaluate(action: Action, receipt: Receipt, options: { revoked?: 
   if (action.digest !== receipt.action.digest) return { state: "STALE", reason: "action identity mismatch", receiptDigest };
   if (canonicalJson(action.dependencies) !== canonicalJson(receipt.dependencySnapshot)) return { state: "STALE", reason: "dependency snapshot mismatch", receiptDigest };
   if (options.availableResultDigest !== undefined && (!DIGEST.test(options.availableResultDigest) || options.availableResultDigest !== receipt.resultDigest)) return { state: "UNKNOWN", reason: "result digest mismatch", receiptDigest };
-  if (receipt.reuseClass === "EXACT") return { state: "REUSABLE_EXACT", reason: "identity and dependencies match", receiptDigest };
+  if (receipt.reuseClass === "EXACT") {
+    if (!admits(receipt, options.trustPolicy)) return { state: "UNKNOWN", reason: "receipt producer, cache scope, or provenance is not trusted", receiptDigest };
+    return { state: "REUSABLE_EXACT", reason: "identity and dependencies match", receiptDigest };
+  }
   if (receipt.reuseClass === "VERIFIED") {
+    if (!admits(receipt, options.trustPolicy)) return { state: "UNKNOWN", reason: "receipt producer, cache scope, or provenance is not trusted", receiptDigest };
     if (receipt.validatorIdentity === null || receipt.validatorIdentity !== action.validatorIdentity) return { state: "REQUIRES_VALIDATION", reason: "matching validator identity required", receiptDigest };
     if (options.validatorResult === undefined) return { state: "REQUIRES_VALIDATION", reason: "current validator required", receiptDigest };
     return options.validatorResult ? { state: "REUSABLE_EXACT", reason: "current validator passed", receiptDigest } : { state: "STALE", reason: "current validator rejected receipt", receiptDigest };

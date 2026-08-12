@@ -1,0 +1,7 @@
+build==1.5.0
+jsonschema==4.26.0
+mypy==1.19.1
+pip-audit==2.10.1
+pytest==8.4.2
+ruff==0.12.11
+twine==7.0.0

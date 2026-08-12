@@ -6,7 +6,8 @@ It uses the shared schemas and vectors and is not presented as a complete Go SDK
 From the repository root:
 
 ```powershell
-go run ./implementations/go/cmd/conformance ./conformance/vectors.json
+go -C implementations/go test ./...
+go -C implementations/go run ./cmd/conformance ../../conformance/vectors.json
 ```
 
 The runner prints a deterministic JSON result and exits nonzero on any vector

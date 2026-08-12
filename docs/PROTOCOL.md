@@ -32,21 +32,29 @@ Canonicalization MUST:
 4. reject arrays or objects with more than 256 entries;
 5. reject nesting deeper than 16 levels;
 6. reject non-string object keys and normalized key collisions;
-7. sort object keys after NFC normalization;
+7. sort object keys after NFC normalization by their UTF-8 byte sequences;
 8. preserve array order;
-9. reject non-finite numbers; and
+9. reject all JSON numbers; producers MUST supply an opaque precomputed input
+   digest when an external input contains numbers; and
 10. emit compact JSON encoded as UTF-8, without insignificant whitespace.
 
 The version 1 Action Identity and Reuse Receipt schemas contain no numeric
 fields. Implementations MUST validate schema field types before hashing; they
-MUST NOT silently coerce strings, booleans, digests, or arrays. If an
-implementation exposes canonicalization for values outside the schemas, it
-MUST document its exact JSON-number behavior and keep it compatible with the
-language-neutral vectors.
+MUST NOT silently coerce strings, booleans, digests, or arrays. Oncefold's
+general canonicalizer intentionally rejects numbers rather than relying on
+language-specific JSON-number behavior. The optional MCP shadow adapter
+therefore fails closed for numeric tool arguments unless the caller supplies
+an input digest under another explicitly specified contract.
 
 An implementation MUST reject a canonical key collision such as two keys that
 become equal after NFC normalization. It MUST NOT resolve the collision by
 choosing one value.
+
+Protocol JSON ingress MUST be bounded to 1 MiB, 32 nesting levels, and 256
+members per object or array. It MUST reject duplicate object keys, non-standard
+JSON constants, all JSON numbers, and invalid Unicode scalar sequences. These
+checks apply before schema parsing; a parser MUST NOT silently accept a later
+duplicate key.
 
 ## 3. Action Identity
 
@@ -75,7 +83,8 @@ Dependencies are objects with `kind`, `identity`, `digest`, and optional
 boolean `required` (default `true`). Dependency `digest` values MUST be
 lowercase SHA-256 digests. Duplicate dependency identities, defined as equal
 `(kind, identity)`, are malformed. Implementations MUST sort dependencies by
-`kind`, `identity`, and `digest` before canonical serialization. A producer
+`kind`, `identity`, and `digest` before canonical serialization, comparing each
+field by its UTF-8 byte sequence. A producer
 MUST set `dependency_completeness` to `false` when relevant inputs are omitted
 or cannot be observed completely; a consumer MUST fail closed for incomplete
 declarations.
@@ -98,7 +107,8 @@ The required fields are:
 - `media_type`;
 - `producer_identity`;
 - `reuse_class`;
-- `created_at`: a timezone-aware timestamp;
+- `created_at`: a strict UTC RFC 3339 timestamp using `Z`, with optional
+  exactly six-digit fractional seconds;
 - `dependency_snapshot`: the producer's dependency snapshot;
 - `trust_scope`;
 - `cache_scope`; and
@@ -119,6 +129,13 @@ The receipt digest is the SHA-256 digest of the canonical receipt object with
 `receipt_digest` omitted and all defaults materialized. The serialized receipt
 then includes that digest. A parser MUST reject a missing or mismatched digest.
 
+`2026-08-11T12:00:00Z` is canonical for an exact second. A non-zero fraction
+is serialized with six digits, for example
+`2026-08-11T12:00:00.123456Z`; an all-zero six-digit fraction normalizes to the
+exact-second form. Offset spellings such as `+00:00` and `+02:00` are rejected,
+not treated as equivalent input. Invalid dates, leap seconds, and other
+timezone spellings are rejected.
+
 `reuse_class` is a producer claim with four values:
 
 - `EXACT`: sufficiently closed, deterministic, inspectable work;
@@ -128,6 +145,21 @@ then includes that digest. A parser MUST reject a missing or mismatched digest.
 
 The class does not override consumer checks. A producer claim is evidence, not
 permission.
+
+### Trust and admission
+
+Receipt and result digests provide integrity, not authenticity. A
+`producer_identity` is only a label unless the consumer supplies an independent
+trust policy. A receipt from an unauthenticated producer MUST NOT by itself
+authorize reuse, regardless of digest validity.
+
+Before an `EXACT` or validator-passed `VERIFIED` receipt can produce
+`REUSABLE_EXACT`, the consumer MUST admit the receipt through an external
+policy that binds at least the producer identity and `cache_scope`. A policy
+MAY additionally require exact provenance entries. An empty or absent policy
+admits no authoritative producer. `cache_scope` is therefore a normative
+consumer-policy input, not an informational field. `ADVISORY` evidence may be
+reported as context but never authorizes reuse.
 
 ## 5. Scope, freshness, and revocation
 
@@ -159,13 +191,18 @@ digest or validator, the consumer MUST apply this precedence:
 7. action digest mismatch -> `STALE`;
 8. dependency snapshot mismatch -> `STALE`;
 9. malformed or unequal available result digest -> `UNKNOWN`;
-10. reuse class `EXACT` -> `REUSABLE_EXACT`;
-11. reuse class `VERIFIED`:
+10. authoritative reuse class with a producer/cache/provenance policy failure
+    -> `UNKNOWN`;
+11. reuse class `EXACT` -> `REUSABLE_EXACT`;
+12. reuse class `VERIFIED`:
     - missing or non-matching validator identity -> `REQUIRES_VALIDATION`;
     - no current validator -> `REQUIRES_VALIDATION`;
     - validator pass -> `REUSABLE_EXACT`;
     - validator failure -> `STALE`; and
-12. reuse class `ADVISORY` -> `ADVISORY_ONLY`.
+13. reuse class `ADVISORY` -> `ADVISORY_ONLY`.
+
+A current validator exception or non-boolean return is `UNKNOWN`; it is never a
+successful validation.
 
 The only decision states are:
 

@@ -18,6 +18,7 @@ from oncefold.identity import (
     ReuseClass,
     SideEffectClass,
     canonical_json,
+    canonical_timestamp,
     sha256_digest,
 )
 
@@ -25,6 +26,7 @@ _ACTION_SCHEMA = "oncefold.action/1"
 _RECEIPT_SCHEMA = "oncefold.receipt/1"
 _MAX_STRING = MAX_STRING_LENGTH
 _MAX_COLLECTION = MAX_COLLECTION_LENGTH
+_MISSING = object()
 
 
 def _bounded_text(value: object, field_name: str, *, required: bool = True) -> str:
@@ -33,6 +35,10 @@ def _bounded_text(value: object, field_name: str, *, required: bool = True) -> s
     text = value
     if required and not text:
         raise ValueError(f"{field_name} is required")
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ValueError(f"{field_name} contains an invalid Unicode scalar") from exc
     if len(text) > _MAX_STRING or any(ord(char) < 0x20 for char in text):
         raise ValueError(f"{field_name} is invalid or exceeds the canonical bound")
     return text
@@ -43,7 +49,7 @@ def _optional_text(value: object | None, field_name: str) -> str | None:
 
 
 def _boolean(value: object, field_name: str, *, default: bool) -> bool:
-    if value is None:
+    if value is _MISSING:
         return default
     if not isinstance(value, bool):
         raise TypeError(f"{field_name} must be boolean")
@@ -89,7 +95,7 @@ def _dependency(value: Mapping[str, Any]) -> DependencyDescriptor:
         kind=_bounded_text(value["kind"], "dependency kind"),
         identity=_bounded_text(value["identity"], "dependency identity"),
         digest=_bounded_text(value["digest"], "dependency digest"),
-        required=_boolean(value.get("required"), "dependency.required", default=True),
+        required=_boolean(value.get("required", _MISSING), "dependency.required", default=True),
     )
 
 
@@ -99,7 +105,14 @@ def _dependencies(value: object, field_name: str) -> tuple[DependencyDescriptor,
     if len(value) > _MAX_COLLECTION:
         raise ValueError(f"{field_name} exceeds the collection bound")
     parsed = tuple(_dependency(item) for item in value)
-    return tuple(sorted(parsed, key=lambda item: (item.kind, item.identity, item.digest)))
+    return tuple(
+        sorted(
+            parsed,
+            key=lambda item: tuple(
+                field.encode("utf-8") for field in (item.kind, item.identity, item.digest)
+            ),
+        )
+    )
 
 
 def _check_digest_field(value: str, field_name: str) -> str:
@@ -145,7 +158,12 @@ class ActionIdentity:
             self,
             "dependencies",
             tuple(
-                sorted(self.dependencies, key=lambda item: (item.kind, item.identity, item.digest))
+                sorted(
+                    self.dependencies,
+                    key=lambda item: tuple(
+                        field.encode("utf-8") for field in (item.kind, item.identity, item.digest)
+                    ),
+                )
             ),
         )
         dependency_ids = {(item.kind, item.identity) for item in self.dependencies}
@@ -184,6 +202,8 @@ class ActionIdentity:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> ActionIdentity:
+        if not isinstance(value, Mapping):
+            raise TypeError("action identity must be an object")
         _strict_keys(
             value,
             {"schema_version", "operation_identity", "operation_version", "input_digest"},
@@ -219,7 +239,9 @@ class ActionIdentity:
                 cast(Mapping[str, Any], value.get("freshness", {})), "freshness"
             ),
             dependency_completeness=_boolean(
-                value.get("dependency_completeness"), "dependency_completeness", default=True
+                value.get("dependency_completeness", _MISSING),
+                "dependency_completeness",
+                default=True,
             ),
             validator_identity=_optional_text(
                 value.get("validator_identity"), "validator_identity"
@@ -268,7 +290,9 @@ class ReuseReceipt:
             tuple(
                 sorted(
                     self.dependency_snapshot,
-                    key=lambda item: (item.kind, item.identity, item.digest),
+                    key=lambda item: tuple(
+                        field.encode("utf-8") for field in (item.kind, item.identity, item.digest)
+                    ),
                 )
             ),
         )
@@ -306,7 +330,9 @@ class ReuseReceipt:
             "media_type": self.media_type,
             "producer_identity": self.producer_identity,
             "reuse_class": self.reuse_class.value,
-            "created_at": self.created_at.isoformat(),
+            "created_at": canonical_timestamp(
+                self.created_at.isoformat(timespec="microseconds").replace("+00:00", "Z")
+            ),
             "dependency_snapshot": [item.as_dict() for item in self.dependency_snapshot],
             "provenance": dict(self.provenance),
             "trust_scope": self.trust_scope,
@@ -329,6 +355,8 @@ class ReuseReceipt:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> ReuseReceipt:
+        if not isinstance(value, Mapping):
+            raise TypeError("reuse receipt must be an object")
         _strict_keys(
             value,
             {
@@ -366,7 +394,9 @@ class ReuseReceipt:
             media_type=_bounded_text(value["media_type"], "media_type"),
             producer_identity=_bounded_text(value["producer_identity"], "producer_identity"),
             reuse_class=ReuseClass(value["reuse_class"]),
-            created_at=datetime.fromisoformat(_bounded_text(value["created_at"], "created_at")),
+            created_at=datetime.fromisoformat(
+                canonical_timestamp(value["created_at"], "created_at").replace("Z", "+00:00")
+            ),
             dependency_snapshot=_dependencies(value["dependency_snapshot"], "dependency_snapshot"),
             provenance=_string_mapping(
                 cast(Mapping[str, Any], value.get("provenance", {})), "provenance"
@@ -528,14 +558,58 @@ class SQLiteReceiptStore:
             db.close()
 
 
-Validator = Callable[[ReuseReceipt], bool]
+Validator = Callable[[ReuseReceipt], object]
+
+
+@dataclass(frozen=True, slots=True)
+class ReceiptTrustPolicy:
+    """Consumer policy that admits receipt provenance for automatic reuse."""
+
+    allowed_producers: frozenset[str] = frozenset()
+    allowed_cache_scopes: frozenset[str] = frozenset()
+    required_provenance: Mapping[str, str] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        for producer in self.allowed_producers:
+            _bounded_text(producer, "allowed producer")
+        for scope in self.allowed_cache_scopes:
+            _bounded_text(scope, "allowed cache scope")
+        object.__setattr__(
+            self,
+            "required_provenance",
+            _string_mapping(self.required_provenance, "required_provenance"),
+        )
+
+    @classmethod
+    def for_producer(
+        cls,
+        producer_identity: str,
+        cache_scope: str,
+        *,
+        required_provenance: Mapping[str, str] | None = None,
+    ) -> ReceiptTrustPolicy:
+        return cls(
+            allowed_producers=frozenset({_bounded_text(producer_identity, "producer_identity")}),
+            allowed_cache_scopes=frozenset({_bounded_text(cache_scope, "cache_scope")}),
+            required_provenance=required_provenance or {},
+        )
+
+    def admits(self, receipt: ReuseReceipt) -> bool:
+        if receipt.producer_identity not in self.allowed_producers:
+            return False
+        if receipt.cache_scope not in self.allowed_cache_scopes:
+            return False
+        return all(
+            receipt.provenance.get(key) == value for key, value in self.required_provenance.items()
+        )
 
 
 class ReceiptVerifier:
     """Deterministic, fail-closed consumer evaluation."""
 
-    def __init__(self, store: ReceiptStore) -> None:
+    def __init__(self, store: ReceiptStore, trust_policy: ReceiptTrustPolicy | None = None) -> None:
         self.store = store
+        self.trust_policy = trust_policy or ReceiptTrustPolicy()
 
     @staticmethod
     def validate_receipt(receipt: ReuseReceipt) -> None:
@@ -629,10 +703,22 @@ class ReceiptVerifier:
                     DecisionState.UNKNOWN, "result digest mismatch", receipt_digest
                 )
         if receipt.reuse_class is ReuseClass.EXACT:
+            if not self.trust_policy.admits(receipt):
+                return ReuseDecision(
+                    DecisionState.UNKNOWN,
+                    "receipt producer, cache scope, or provenance is not trusted",
+                    receipt_digest,
+                )
             return ReuseDecision(
                 DecisionState.REUSABLE_EXACT, "identity and dependencies match", receipt_digest
             )
         if receipt.reuse_class is ReuseClass.VERIFIED:
+            if not self.trust_policy.admits(receipt):
+                return ReuseDecision(
+                    DecisionState.UNKNOWN,
+                    "receipt producer, cache scope, or provenance is not trusted",
+                    receipt_digest,
+                )
             if (
                 not receipt.validator_identity
                 or receipt.validator_identity != action.validator_identity
@@ -646,7 +732,19 @@ class ReceiptVerifier:
                 return ReuseDecision(
                     DecisionState.REQUIRES_VALIDATION, "current validator required", receipt_digest
                 )
-            if validator(receipt):
+            try:
+                validation_result = validator(receipt)
+            except Exception:
+                return ReuseDecision(
+                    DecisionState.UNKNOWN, "current validator failed", receipt_digest
+                )
+            if type(validation_result) is not bool:
+                return ReuseDecision(
+                    DecisionState.UNKNOWN,
+                    "current validator returned a non-boolean result",
+                    receipt_digest,
+                )
+            if validation_result:
                 return ReuseDecision(
                     DecisionState.REUSABLE_EXACT, "current validator passed", receipt_digest
                 )

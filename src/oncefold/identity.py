@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import re
 import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -16,6 +16,9 @@ MAX_STRING_LENGTH = 4096
 MAX_COLLECTION_LENGTH = 256
 MAX_CANONICAL_DEPTH = 16
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+_TIMESTAMP_RE = re.compile(
+    r"^[1-9][0-9]{3}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{6})?Z$"
+)
 
 
 class ReuseClass(StrEnum):
@@ -41,6 +44,10 @@ def _bounded_string(value: object, field_name: str, *, required: bool = True) ->
         raise TypeError(f"{field_name} must be a string")
     if required and not value:
         raise ValueError(f"{field_name} is required")
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ValueError(f"{field_name} contains an invalid Unicode scalar") from exc
     if len(value) > MAX_STRING_LENGTH or any(ord(char) < 0x20 for char in value):
         raise ValueError(f"{field_name} is invalid or exceeds the canonical bound")
     return value
@@ -56,12 +63,8 @@ def _normalize(value: Any, *, depth: int = 0) -> Any:
     if isinstance(value, str):
         _bounded_string(value, "canonical string", required=False)
         return unicodedata.normalize("NFC", value)
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        if not math.isfinite(value):
-            raise ValueError("non-finite numbers are not canonicalizable")
-        return value
+    if isinstance(value, int | float):
+        raise TypeError("numbers are not canonicalizable; supply an opaque input digest")
     if isinstance(value, Mapping):
         if len(value) > MAX_COLLECTION_LENGTH:
             raise ValueError("mapping exceeds the canonical bound")
@@ -70,11 +73,11 @@ def _normalize(value: Any, *, depth: int = 0) -> Any:
             if not isinstance(key, str):
                 raise TypeError("canonical object keys must be strings")
             normalized_key = unicodedata.normalize("NFC", key)
-            _bounded_string(normalized_key, "canonical object key")
+            _bounded_string(normalized_key, "canonical object key", required=False)
             if normalized_key in normalized:
                 raise ValueError("mapping keys collide after normalization")
             normalized[normalized_key] = _normalize(item, depth=depth + 1)
-        return dict(sorted(normalized.items()))
+        return dict(sorted(normalized.items(), key=lambda item: item[0].encode("utf-8")))
     if isinstance(value, list | tuple):
         if len(value) > MAX_COLLECTION_LENGTH:
             raise ValueError("sequence exceeds the canonical bound")
@@ -89,9 +92,28 @@ def canonical_json(value: Any) -> bytes:
         _normalize(value),
         ensure_ascii=False,
         separators=(",", ":"),
-        sort_keys=True,
+        sort_keys=False,
         allow_nan=False,
     ).encode("utf-8")
+
+
+def canonical_timestamp(value: object, field_name: str = "timestamp") -> str:
+    """Validate and normalize the protocol's strict UTC timestamp syntax."""
+
+    text = _bounded_string(value, field_name)
+    if not _TIMESTAMP_RE.fullmatch(text):
+        raise ValueError(
+            f"{field_name} must be RFC 3339 UTC with Z and optional six-digit fractions"
+        )
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"{field_name} is not a valid timestamp") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() != UTC.utcoffset(parsed):
+        raise ValueError(f"{field_name} must be UTC")
+    if parsed.microsecond:
+        return parsed.astimezone(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
+    return parsed.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def sha256_digest(value: bytes) -> str:

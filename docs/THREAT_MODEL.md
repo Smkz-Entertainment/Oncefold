@@ -25,11 +25,15 @@ Oncefold treats producer claims and tool output as untrusted evidence.
 ## Controls
 
 - bounded canonical JSON with NFC normalization and key-collision rejection;
+- bounded duplicate-key-rejecting JSON ingress with invalid-Unicode rejection;
+- strict UTC timestamp syntax and language-neutral UTF-8 key ordering;
 - lowercase SHA-256 action, result, and receipt digests;
 - strict schema versions and unknown-field rejection;
 - exact dependency identity and snapshot comparison;
 - explicit side-effect, trust-scope, authorization-scope, validator, and
   revocation checks;
+- consumer-supplied producer/cache-scope/provenance admission policy before
+  authoritative reuse;
 - deterministic decision precedence that fails closed;
 - no raw prompts, private reasoning, credentials, or secrets in protocol fields;
 - storage-independent verification; and
@@ -37,10 +41,12 @@ Oncefold treats producer claims and tool output as untrusted evidence.
 
 ## Accepted gaps
 
-The 0.1 release does not authenticate remote publishers, sign receipts, prove
-complete dependency closure, isolate hostile tenants on a shared host, verify
-semantic correctness of arbitrary outputs, or provide durable distributed result
-transport after process failure. It is not suitable by itself for payments,
+The pre-1.0 candidate does not authenticate remote publishers, sign receipts,
+prove complete dependency closure, isolate hostile tenants on a shared host,
+verify semantic correctness of arbitrary outputs, or provide durable
+distributed result transport after process failure. A trust policy binds a
+consumer's local admission decision; it is not a cryptographic publisher
+signature or a public trust network. The project is not suitable by itself for payments,
 email, deployment, package publication, destructive infrastructure changes, or
 authorization-sensitive merges.
 

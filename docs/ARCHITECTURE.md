@@ -9,7 +9,7 @@ tool or agent runtime
 completed result + producer facts
         |
         v
-Action Identity -> Reuse Receipt -> deterministic verifier -> Reuse Decision
+Action Identity -> Reuse Receipt -> trust admission + deterministic verifier -> Reuse Decision
         |                               |
         +--> optional store ------------+
         +--> optional MCP shadow adapter
@@ -26,6 +26,9 @@ The core has no execution authority. A producer performs work and supplies the
 facts it can observe. Oncefold evaluates those facts; it does not discover
 complete dependencies magically or decide whether an arbitrary model answer is
 true.
+
+A consumer must explicitly configure producer, cache-scope, and optional
+provenance admission before an authoritative reuse result is possible.
 
 ## Reference-only components
 

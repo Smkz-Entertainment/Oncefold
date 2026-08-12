@@ -18,6 +18,7 @@ from oncefold.protocol import (
     ActionIdentity,
     DecisionState,
     ReceiptStore,
+    ReceiptTrustPolicy,
     ReceiptVerifier,
     ReuseDecision,
     ReuseReceipt,
@@ -40,9 +41,9 @@ class ShadowObservation:
 class MCPShadowProxy:
     """Observe equivalent tools/call requests while always forwarding the real call."""
 
-    def __init__(self, store: ReceiptStore) -> None:
+    def __init__(self, store: ReceiptStore, trust_policy: ReceiptTrustPolicy | None = None) -> None:
         self.store = store
-        self.verifier = ReceiptVerifier(store)
+        self.verifier = ReceiptVerifier(store, trust_policy)
         self._by_action: dict[str, str] = {}
 
     @staticmethod
