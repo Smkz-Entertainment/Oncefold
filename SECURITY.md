@@ -7,9 +7,9 @@ authorization-sensitive merges.
 
 ## Supported versions
 
-Only the current `main` branch is supported before the first tagged release.
-There is no supported 0.1.0 release yet; the repository remains a private
-pre-release candidate.
+Only the current `main` branch and the latest tagged release are supported
+while Oncefold remains pre-1.0. Before the first tag, `main` is the supported
+pre-release line.
 
 ## Reporting a vulnerability
 

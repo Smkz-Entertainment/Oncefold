@@ -1,8 +1,9 @@
-# Pre-public release checklist
+# Release checklist
 
-Oncefold remains private and untagged until every required gate below has fresh
-evidence for the exact candidate commit. A local pass does not replace hosted
-CI, independent review, or repository protection.
+This checklist records the gates for a tagged Oncefold release. Repository
+visibility is a separate governance state: a public repository may still be
+pre-release. Evidence must be fresh for the exact candidate commit. A local
+pass does not replace hosted CI, independent review, or repository protection.
 
 ## Technical gates
 
@@ -29,12 +30,12 @@ CI, independent review, or repository protection.
 - [ ] `SECURITY.md` and the repository security policy are visible on `main`.
 - [ ] The repository description, topics, license, issue policy, and canonical
       documentation are correct.
-- [ ] `CHANGELOG.md` still says `Unreleased` until the release commit exists.
+- [ ] `CHANGELOG.md` contains the intended release entry before tagging.
 
 ## Publication gates
 
 - [ ] An independent reviewer approves the exact candidate commit.
 - [ ] The release version, tag, release notes, and published artifacts are
       created together after all gates pass.
-- [ ] Repository visibility changes only after the preceding evidence is
-      recorded; no tag or release is created while the candidate is on hold.
+- [ ] If the repository is public before tagging, its pre-release status is
+      explicit and no tag or release is created while the candidate is on hold.

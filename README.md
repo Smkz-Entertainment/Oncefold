@@ -157,7 +157,7 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md), [`SECURITY.md`](SECURITY.md), and
 reasoning, credentials, secrets, private repository data, or external-mutation
 replay paths to the project.
 
-The exact pre-publication gates are recorded in
+The exact release gates are recorded in
 [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md).
 
 Oncefold is released under Apache-2.0.

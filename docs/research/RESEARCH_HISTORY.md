@@ -1,9 +1,10 @@
 # Research history
 
 Oncefold is publishing the part of a longer validation program that survived
-negative results. Historical raw work remains in the private source worktree;
-this public record keeps the decisions and their boundaries without publishing
-runtime transcripts, prompts, local paths, or unrelated repository data.
+negative results. Historical raw work is intentionally not included in this
+public repository; this record keeps the decisions and their boundaries
+without publishing runtime transcripts, prompts, local paths, or unrelated
+repository data.
 
 ## V1 — broad exploration
 
@@ -60,8 +61,7 @@ primary-observation gates:
 - zero cross-runtime safe repeats; and
 - both reuse measures below the frozen 15% standalone threshold.
 
-The V5.1 result is preserved in the private-source evidence commit `509e7ff`
-and summarized without private raw rows in
+The V5.1 result is summarized without private raw rows in
 [`V51_ECONOMICS_SUMMARY.json`](V51_ECONOMICS_SUMMARY.json).
 
 ## Conclusion

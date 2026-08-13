@@ -1,6 +1,8 @@
 # Changelog
 
-## [Unreleased] — pre-public hardening candidate
+## 0.1.0 — 2026-08-13
+
+This release establishes Oncefold's experimental pre-1.0 protocol baseline.
 
 - Candidate baseline for the Oncefold Action Identity, Reuse Receipt, and
   deterministic Reuse Decision protocol.
