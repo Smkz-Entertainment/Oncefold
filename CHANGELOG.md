@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Added an independent .NET 8 conformance consumer and required .NET CI
+  coverage. This is repository-controlled cross-runtime evidence, not external
+  adoption evidence.
+
 ## 0.1.0 — 2026-08-13
 
 This release establishes Oncefold's experimental pre-1.0 protocol baseline.
