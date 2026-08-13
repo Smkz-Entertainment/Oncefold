@@ -25,8 +25,8 @@ Oncefold is deliberately narrower than a cache or agent platform.
 - External mutations such as email, payments, deployment, package publication,
   destructive infrastructure changes, and authorization-sensitive merges are
   unsafe for automatic reuse.
-- The pre-1.0 Python, TypeScript, and Go implementations are reference/conformance
-  implementations, not mature SDKs with a long-term compatibility guarantee.
+- The pre-1.0 Python reference and TypeScript, Go, and .NET conformance
+  implementations are not mature SDKs with a long-term compatibility guarantee.
 - MCP interoperability is an optional shadow example and does not claim MCP
   endorsement or standardization.
 - The research tested protocol/evidence behavior and bounded economics. It did
