@@ -89,10 +89,12 @@ function text(value: unknown, name: string, optional = false, maxLength = 4096):
   if (value === null && optional) return null;
   if (typeof value !== "string" || (!optional && value.length === 0)) fail(`${name} must be a string`);
   assertWellFormed(value, name);
-  if ([...value].length > maxLength || [...value].some((char) => char.codePointAt(0)! < 0x20)) {
+  const normalized = value.normalize("NFC");
+  assertWellFormed(normalized, name);
+  if ([...normalized].length > maxLength || [...normalized].some((char) => char.codePointAt(0)! < 0x20)) {
     fail(`${name} exceeds canonical bounds`);
   }
-  return value;
+  return normalized;
 }
 
 function digest(value: unknown, name: string): string {
@@ -111,12 +113,13 @@ function normalize(value: unknown, depth = 0): JsonValue {
   if (depth > 16) fail("canonical value is too deeply nested");
   if (value === null || typeof value === "boolean" || typeof value === "string") {
     if (typeof value === "string") {
-      assertWellFormed(value, "canonical string");
-      if ([...value].length > 4096 || [...value].some((char) => char.codePointAt(0)! < 0x20)) {
+      const normalized = text(value, "canonical string", false, 4096)!;
+      if ([...normalized].length > 4096 || [...normalized].some((char) => char.codePointAt(0)! < 0x20)) {
         fail("canonical string exceeds bounds");
       }
+      return normalized;
     }
-    return typeof value === "string" ? value.normalize("NFC") : value;
+    return value;
   }
   if (typeof value === "number") fail("numbers are not canonicalizable; supply an opaque input digest");
   if (Array.isArray(value)) {
@@ -126,15 +129,11 @@ function normalize(value: unknown, depth = 0): JsonValue {
   const source = object(value, "canonical object");
   if (Object.keys(source).length > 256) fail("canonical object exceeds bound");
   const entries = Object.entries(source).map(([key, item]) => {
-    const normalizedKey = key.normalize("NFC");
-    assertWellFormed(normalizedKey, "canonical object key");
-    if ([...normalizedKey].length > 4096 || [...normalizedKey].some((char) => char.codePointAt(0)! < 0x20)) {
-      fail("canonical object key exceeds bounds");
-    }
+    const normalizedKey = text(key, "canonical object key", false, 4096)!;
     return [normalizedKey, normalize(item, depth + 1)] as const;
   });
   entries.sort(([left], [right]) => compareUtf8(left, right));
-  const result: Record<string, JsonValue> = {};
+  const result: Record<string, JsonValue> = Object.create(null) as Record<string, JsonValue>;
   for (let index = 0; index < entries.length; index += 1) {
     if (index > 0 && entries[index - 1][0] === entries[index][0]) fail("canonical key collision");
     result[entries[index][0]] = entries[index][1];
@@ -186,7 +185,7 @@ class JsonParser {
   }
 
   parseObject(): Record<string, JsonValue> {
-    const value = this.parseValue(0);
+    const value = this.parseValue(1);
     this.skipWhitespace();
     if (this.position !== this.source.length) fail("trailing JSON input");
     if (value === null || typeof value !== "object" || Array.isArray(value)) fail("JSON document must be an object");
@@ -194,11 +193,10 @@ class JsonParser {
   }
 
   private parseValue(depth: number): JsonValue {
-    if (depth > MAX_JSON_DEPTH) fail("JSON nesting exceeds the input bound");
     this.skipWhitespace();
     const character = this.source[this.position];
-    if (character === "{") return this.parseObjectValue(depth + 1);
-    if (character === "[") return this.parseArrayValue(depth + 1);
+    if (character === "{") return this.parseObjectValue(depth);
+    if (character === "[") return this.parseArrayValue(depth);
     if (character === '"') return this.parseString();
     if (this.source.startsWith("true", this.position)) {
       this.position += 4;
@@ -219,6 +217,7 @@ class JsonParser {
   }
 
   private parseObjectValue(depth: number): Record<string, JsonValue> {
+    if (depth > MAX_JSON_DEPTH) fail("JSON nesting exceeds the input bound");
     this.position += 1;
     const result: Record<string, JsonValue> = Object.create(null) as Record<string, JsonValue>;
     this.skipWhitespace();
@@ -230,7 +229,7 @@ class JsonParser {
       if (Object.prototype.hasOwnProperty.call(result, key)) fail(`duplicate JSON object key: ${key}`);
       this.skipWhitespace();
       if (!this.take(":")) fail("expected colon after JSON object key");
-      result[key] = this.parseValue(depth);
+      result[key] = this.parseValue(depth + 1);
       if (Object.keys(result).length > 256) fail("JSON object exceeds the input bound");
       this.skipWhitespace();
       if (this.take("}")) return result;
@@ -239,12 +238,13 @@ class JsonParser {
   }
 
   private parseArrayValue(depth: number): JsonValue[] {
+    if (depth > MAX_JSON_DEPTH) fail("JSON nesting exceeds the input bound");
     this.position += 1;
     const result: JsonValue[] = [];
     this.skipWhitespace();
     if (this.take("]")) return result;
     while (true) {
-      result.push(this.parseValue(depth));
+      result.push(this.parseValue(depth + 1));
       if (result.length > 256) fail("JSON array exceeds the input bound");
       this.skipWhitespace();
       if (this.take("]")) return result;
@@ -304,13 +304,14 @@ export function sha256(value: string): string {
   return createHash("sha256").update(Buffer.from(value, "utf8")).digest("hex");
 }
 
-function stringMap(value: unknown, name: string): Record<string, JsonValue> {
+function stringMap(value: unknown, name: string): Record<string, string> {
   const source = object(value === undefined ? {} : value, name);
   if (Object.keys(source).length > 256) fail(`${name} exceeds the collection bound`);
-  const result: Record<string, JsonValue> = {};
+  const result: Record<string, string> = Object.create(null) as Record<string, string>;
   for (const [key, item] of Object.entries(source)) {
-    text(key, `${name} key`);
-    result[key] = text(item, `${name}.${key}`)!;
+    const normalizedKey = text(key, `${name} key`)!;
+    if (Object.prototype.hasOwnProperty.call(result, normalizedKey)) fail(`${name} keys collide after NFC normalization`);
+    result[normalizedKey] = text(item, `${name}.${normalizedKey}`)!;
   }
   return result;
 }
@@ -435,6 +436,7 @@ function admits(receipt: Receipt, policy: TrustPolicy | undefined): boolean {
 }
 
 export function evaluate(action: Action, receipt: Receipt, options: { revoked?: boolean; availableResultDigest?: string; validatorResult?: unknown; trustPolicy?: TrustPolicy } = {}): Decision {
+  const trustPolicy = options.trustPolicy === undefined ? undefined : normalizeTrustPolicy(options.trustPolicy);
   const receiptDigest = receipt.digest;
   if (options.revoked || receipt.revocationRef !== null) return { state: "REVOKED", reason: "receipt revoked", receiptDigest };
   if (action.trustScope !== receipt.trustScope || action.trustScope !== receipt.action.trustScope || action.authorizationScopeDigest !== receipt.action.authorizationScopeDigest) return { state: "SCOPE_MISMATCH", reason: "scope mismatch", receiptDigest };
@@ -445,11 +447,11 @@ export function evaluate(action: Action, receipt: Receipt, options: { revoked?: 
   if (canonicalJson(action.dependencies) !== canonicalJson(receipt.dependencySnapshot)) return { state: "STALE", reason: "dependency snapshot mismatch", receiptDigest };
   if (options.availableResultDigest !== undefined && (!DIGEST.test(options.availableResultDigest) || options.availableResultDigest !== receipt.resultDigest)) return { state: "UNKNOWN", reason: "result digest mismatch", receiptDigest };
   if (receipt.reuseClass === "EXACT") {
-    if (!admits(receipt, options.trustPolicy)) return { state: "UNKNOWN", reason: "receipt producer, cache scope, or provenance is not trusted", receiptDigest };
+    if (!admits(receipt, trustPolicy)) return { state: "UNKNOWN", reason: "receipt producer, cache scope, or provenance is not trusted", receiptDigest };
     return { state: "REUSABLE_EXACT", reason: "identity and dependencies match", receiptDigest };
   }
   if (receipt.reuseClass === "VERIFIED") {
-    if (!admits(receipt, options.trustPolicy)) return { state: "UNKNOWN", reason: "receipt producer, cache scope, or provenance is not trusted", receiptDigest };
+    if (!admits(receipt, trustPolicy)) return { state: "UNKNOWN", reason: "receipt producer, cache scope, or provenance is not trusted", receiptDigest };
     if (receipt.validatorIdentity === null || receipt.validatorIdentity !== action.validatorIdentity) return { state: "REQUIRES_VALIDATION", reason: "matching validator identity required", receiptDigest };
     if (options.validatorResult !== undefined && typeof options.validatorResult !== "boolean") return { state: "UNKNOWN", reason: "current validator returned a non-boolean result", receiptDigest };
     if (options.validatorResult === undefined) return { state: "REQUIRES_VALIDATION", reason: "current validator required", receiptDigest };
@@ -459,8 +461,17 @@ export function evaluate(action: Action, receipt: Receipt, options: { revoked?: 
   return { state: "UNSAFE", reason: "unknown reuse class", receiptDigest };
 }
 
+function normalizeTrustPolicy(policy: TrustPolicy): TrustPolicy {
+  const requiredProvenance = stringMap(policy.requiredProvenance, "requiredProvenance");
+  return {
+    allowedProducers: policy.allowedProducers.map((producer) => text(producer, "allowed producer")!),
+    allowedCacheScopes: policy.allowedCacheScopes.map((scope) => text(scope, "allowed cache scope")!),
+    requiredProvenance,
+  };
+}
+
 export function materializeReceipt(base: Record<string, JsonValue>, patch: Record<string, JsonValue>, recompute: boolean): Record<string, JsonValue> {
-  const candidate: Record<string, JsonValue> = { ...base, ...patch };
+  const candidate: Record<string, JsonValue> = Object.assign(Object.create(null), base, patch) as Record<string, JsonValue>;
   if (!recompute) return candidate;
   delete candidate.receipt_digest;
   const parsed = parseReceipt(candidate, true);

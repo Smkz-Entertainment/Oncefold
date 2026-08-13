@@ -11,8 +11,10 @@ import (
 
 type vectorDocument struct {
 	Canonicalization struct {
-		UTF8KeyOrder       map[string]any `json:"utf8_key_order"`
-		UTF8KeyOrderDigest string         `json:"utf8_key_order_digest"`
+		UTF8KeyOrder             map[string]any `json:"utf8_key_order"`
+		UTF8KeyOrderDigest       string         `json:"utf8_key_order_digest"`
+		PrototypeKeyObject       map[string]any `json:"prototype_key_object"`
+		PrototypeKeyObjectDigest string         `json:"prototype_key_object_digest"`
 	} `json:"canonicalization"`
 	Base struct {
 		Action  map[string]any `json:"action"`
@@ -85,6 +87,10 @@ func main() {
 	keyOrderDigest, digestErr := verifier.SHA256Canonical(document.Canonicalization.UTF8KeyOrder)
 	if digestErr != nil || keyOrderDigest != document.Canonicalization.UTF8KeyOrderDigest {
 		failures = append(failures, "canonicalization: UTF-8 key order digest mismatch")
+	}
+	prototypeKeyDigest, digestErr := verifier.SHA256Canonical(document.Canonicalization.PrototypeKeyObject)
+	if digestErr != nil || prototypeKeyDigest != document.Canonicalization.PrototypeKeyObjectDigest {
+		failures = append(failures, "canonicalization: prototype-key digest mismatch")
 	}
 	for _, item := range document.Timestamps {
 		actual, timestampErr := verifier.CanonicalTimestamp(item.Value)

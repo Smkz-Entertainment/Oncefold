@@ -114,7 +114,7 @@ attestation. See [`docs/MCP_INTEROP.md`](docs/MCP_INTEROP.md).
   consumer, not a full SDK.
 - Go in `implementations/go/` is an independent conformance consumer, not a
   full SDK.
-- The language-neutral corpus is in `conformance/vectors.json` (53 decision
+- The language-neutral corpus is in `conformance/vectors.json` (60 decision
   cases plus shared ingress fixtures).
 
 Run the portable checks from the repository root:

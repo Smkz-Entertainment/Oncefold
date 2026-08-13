@@ -1,14 +1,15 @@
 # Conformance
 
 Oncefold ships one language-neutral JSON corpus at
-[`../conformance/vectors.json`](../conformance/vectors.json). The corpus has 53
+[`../conformance/vectors.json`](../conformance/vectors.json). The corpus has 60
 cases covering exact reuse, direct and transitive dependency changes, unrelated
 changes, tool and validator changes, freshness, scope, revocation, result
 integrity, incomplete declarations, malformed fields, Unicode NFC, advisory
   and verified classes, and duplicate dependencies.
 
 The document also carries shared timestamp, duplicate-key, number-rejection,
-and invalid-Unicode/line-separator ingress cases. The trust policy in the document binds the
+invalid-Unicode/line-separator, prototype-key, and exact-depth ingress cases.
+The trust policy in the document binds the
 base producer, cache scope, and provenance so an exact result cannot pass only
 because its self-declared digest is valid.
 

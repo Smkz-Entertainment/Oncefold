@@ -143,9 +143,20 @@ func normalize(value any, depth int) (any, error) {
 		}
 		result := make(map[string]any, len(typed))
 		for key, item := range typed {
+			if !utf8.ValidString(key) {
+				return nil, fmt.Errorf("canonical object key is not valid UTF-8")
+			}
 			cleanKey := norm.NFC.String(key)
 			if containsForbiddenCodePoint(cleanKey) {
 				return nil, fmt.Errorf("canonical object key contains a prohibited line-separator code point")
+			}
+			if utf8.RuneCountInString(cleanKey) > 4096 {
+				return nil, fmt.Errorf("canonical object key exceeds bound")
+			}
+			for _, character := range cleanKey {
+				if character < 0x20 {
+					return nil, fmt.Errorf("canonical object key contains control character")
+				}
 			}
 			if _, exists := result[cleanKey]; exists {
 				return nil, fmt.Errorf("canonical key collision")
@@ -237,15 +248,15 @@ func validateJSONText(data []byte) error {
 }
 
 func decodeValue(decoder *json.Decoder, depth int) (any, error) {
-	if depth > maxJSONDepth {
-		return nil, fmt.Errorf("JSON nesting exceeds the input bound")
-	}
 	token, err := decoder.Token()
 	if err != nil {
 		return nil, err
 	}
 	switch typed := token.(type) {
 	case json.Delim:
+		if depth > maxJSONDepth {
+			return nil, fmt.Errorf("JSON nesting exceeds the input bound")
+		}
 		switch typed {
 		case '{':
 			result := map[string]any{}
@@ -320,7 +331,7 @@ func ParseJSON(data []byte) (any, error) {
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
-	value, err := decodeValue(decoder, 0)
+	value, err := decodeValue(decoder, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -365,22 +376,29 @@ func stringValue(value any, name string, optional bool, maxLengths ...int) (stri
 		return "", nil, nil
 	}
 	text, ok := value.(string)
+	if !ok {
+		return "", nil, fmt.Errorf("%s must be a bounded string", name)
+	}
+	if !utf8.ValidString(text) {
+		return "", nil, fmt.Errorf("%s must be a bounded string", name)
+	}
+	normalized := norm.NFC.String(text)
 	maxLength := 4096
 	if len(maxLengths) > 0 {
 		maxLength = maxLengths[0]
 	}
-	if !ok || (!optional && text == "") || !utf8.ValidString(text) || containsForbiddenCodePoint(text) || utf8.RuneCountInString(text) > maxLength {
+	if (!optional && normalized == "") || !utf8.ValidString(normalized) || containsForbiddenCodePoint(normalized) || utf8.RuneCountInString(normalized) > maxLength {
 		return "", nil, fmt.Errorf("%s must be a bounded string", name)
 	}
-	for _, character := range text {
+	for _, character := range normalized {
 		if character < 0x20 {
 			return "", nil, fmt.Errorf("%s contains a control character", name)
 		}
 	}
 	if optional {
-		return "", &text, nil
+		return "", &normalized, nil
 	}
-	return text, nil, nil
+	return normalized, nil, nil
 }
 
 func requiredDigest(value any, name string) (string, error) {
@@ -398,11 +416,18 @@ func stringMap(value any, name string) (map[string]any, error) {
 	}
 	result := make(map[string]any, len(source))
 	for key, item := range source {
-		text, _, err := stringValue(item, name+"."+key, false)
+		normalizedKey, _, err := stringValue(key, name+" key", false)
 		if err != nil {
 			return nil, err
 		}
-		result[key] = text
+		if _, exists := result[normalizedKey]; exists {
+			return nil, fmt.Errorf("%s keys collide after NFC normalization", name)
+		}
+		text, _, err := stringValue(item, name+"."+normalizedKey, false)
+		if err != nil {
+			return nil, err
+		}
+		result[normalizedKey] = text
 	}
 	return result, nil
 }
@@ -508,7 +533,7 @@ func CanonicalTimestamp(value string) (string, error) {
 func admits(receipt Receipt, policy TrustPolicy) bool {
 	producerAllowed := false
 	for _, producer := range policy.AllowedProducers {
-		if producer == receipt.ProducerIdentity {
+		if norm.NFC.String(producer) == receipt.ProducerIdentity {
 			producerAllowed = true
 			break
 		}
@@ -518,7 +543,7 @@ func admits(receipt Receipt, policy TrustPolicy) bool {
 	}
 	scopeAllowed := false
 	for _, scope := range policy.AllowedCacheScopes {
-		if scope == receipt.CacheScope {
+		if norm.NFC.String(scope) == receipt.CacheScope {
 			scopeAllowed = true
 			break
 		}
@@ -527,7 +552,7 @@ func admits(receipt Receipt, policy TrustPolicy) bool {
 		return false
 	}
 	for key, value := range policy.RequiredProvenance {
-		if receipt.Provenance[key] != value {
+		if receipt.Provenance[norm.NFC.String(key)] != norm.NFC.String(value) {
 			return false
 		}
 	}

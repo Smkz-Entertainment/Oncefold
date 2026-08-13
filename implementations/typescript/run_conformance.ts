@@ -27,7 +27,12 @@ type TimestampCase = { value: string; accepted: boolean; canonical?: string };
 
 const vectorPath = process.argv[2] ?? "conformance/vectors.json";
 const document = parseJsonObject(readFileSync(vectorPath, "utf8")) as unknown as {
-  canonicalization: { utf8_key_order: Record<string, JsonValue>; utf8_key_order_digest: string };
+  canonicalization: {
+    utf8_key_order: Record<string, JsonValue>;
+    utf8_key_order_digest: string;
+    prototype_key_object: Record<string, JsonValue>;
+    prototype_key_object_digest: string;
+  };
   base: { action: Record<string, JsonValue>; receipt: Record<string, JsonValue> };
   cases: Case[];
   trust_policy: { allowed_producers: string[]; allowed_cache_scopes: string[]; required_provenance: Record<string, string> };
@@ -48,6 +53,8 @@ try {
   }
   const keyOrderDigest = createHash("sha256").update(Buffer.from(canonicalJson(document.canonicalization.utf8_key_order), "utf8")).digest("hex");
   if (keyOrderDigest !== document.canonicalization.utf8_key_order_digest) failures.push("canonicalization: UTF-8 key order digest mismatch");
+  const prototypeKeyDigest = createHash("sha256").update(Buffer.from(canonicalJson(document.canonicalization.prototype_key_object), "utf8")).digest("hex");
+  if (prototypeKeyDigest !== document.canonicalization.prototype_key_object_digest) failures.push("canonicalization: prototype-key digest mismatch");
 } catch {
   failures.push("canonicalization: scalar/key-order fixture rejected");
 }

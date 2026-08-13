@@ -55,11 +55,12 @@ def _bounded_string(
         value.encode("utf-8")
     except UnicodeEncodeError as exc:
         raise ValueError(f"{field_name} contains an invalid Unicode scalar") from exc
-    if any(char in "\u2028\u2029" for char in value):
+    normalized = unicodedata.normalize("NFC", value)
+    if any(char in "\u2028\u2029" for char in normalized):
         raise ValueError(f"{field_name} contains a prohibited line-separator code point")
-    if len(value) > max_length or any(ord(char) < 0x20 for char in value):
+    if len(normalized) > max_length or any(ord(char) < 0x20 for char in normalized):
         raise ValueError(f"{field_name} is invalid or exceeds the canonical bound")
-    return value
+    return normalized
 
 
 def _normalize(value: Any, *, depth: int = 0) -> Any:
@@ -70,8 +71,7 @@ def _normalize(value: Any, *, depth: int = 0) -> Any:
     if value is None or isinstance(value, bool):
         return value
     if isinstance(value, str):
-        _bounded_string(value, "canonical string", required=False)
-        return unicodedata.normalize("NFC", value)
+        return _bounded_string(value, "canonical string", required=False)
     if isinstance(value, int | float):
         raise TypeError("numbers are not canonicalizable; supply an opaque input digest")
     if isinstance(value, Mapping):
@@ -81,8 +81,7 @@ def _normalize(value: Any, *, depth: int = 0) -> Any:
         for key, item in value.items():
             if not isinstance(key, str):
                 raise TypeError("canonical object keys must be strings")
-            normalized_key = unicodedata.normalize("NFC", key)
-            _bounded_string(normalized_key, "canonical object key", required=False)
+            normalized_key = _bounded_string(key, "canonical object key", required=False)
             if normalized_key in normalized:
                 raise ValueError("mapping keys collide after normalization")
             normalized[normalized_key] = _normalize(item, depth=depth + 1)
@@ -148,13 +147,17 @@ class DependencyDescriptor:
     required: bool = True
 
     def __post_init__(self) -> None:
-        _bounded_string(
-            self.kind,
-            "dependency kind",
-            max_length=MAX_DEPENDENCY_KIND_LENGTH,
+        object.__setattr__(
+            self,
+            "kind",
+            _bounded_string(
+                self.kind,
+                "dependency kind",
+                max_length=MAX_DEPENDENCY_KIND_LENGTH,
+            ),
         )
-        _bounded_string(self.identity, "dependency identity")
-        _check_digest(self.digest, "dependency digest")
+        object.__setattr__(self, "identity", _bounded_string(self.identity, "dependency identity"))
+        object.__setattr__(self, "digest", _check_digest(self.digest, "dependency digest"))
         if not isinstance(self.required, bool):
             raise TypeError("dependency required flag must be boolean")
 

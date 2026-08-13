@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import unicodedata
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -46,11 +47,12 @@ def _bounded_text(
         text.encode("utf-8")
     except UnicodeEncodeError as exc:
         raise ValueError(f"{field_name} contains an invalid Unicode scalar") from exc
-    if any(char in "\u2028\u2029" for char in text):
+    normalized = unicodedata.normalize("NFC", text)
+    if any(char in "\u2028\u2029" for char in normalized):
         raise ValueError(f"{field_name} contains a prohibited line-separator code point")
-    if len(text) > max_length or any(ord(char) < 0x20 for char in text):
+    if len(normalized) > max_length or any(ord(char) < 0x20 for char in normalized):
         raise ValueError(f"{field_name} is invalid or exceeds the canonical bound")
-    return text
+    return normalized
 
 
 def _optional_text(value: object | None, field_name: str) -> str | None:
@@ -85,16 +87,14 @@ def _string_mapping(value: Mapping[str, Any], field_name: str) -> Mapping[str, s
         raise TypeError(f"{field_name} must be an object")
     if len(value) > _MAX_COLLECTION:
         raise ValueError(f"{field_name} exceeds the collection bound")
+    normalized: dict[str, str] = {}
+    for key, item in value.items():
+        normalized_key = _bounded_text(key, f"{field_name} key")
+        if normalized_key in normalized:
+            raise ValueError(f"{field_name} keys collide after NFC normalization")
+        normalized[normalized_key] = _bounded_text(item, f"{field_name} value")
     return MappingProxyType(
-        dict(
-            sorted(
-                (
-                    _bounded_text(key, f"{field_name} key"),
-                    _bounded_text(item, f"{field_name} value"),
-                )
-                for key, item in value.items()
-            )
-        )
+        dict(sorted(normalized.items(), key=lambda item: item[0].encode("utf-8")))
     )
 
 
@@ -152,10 +152,16 @@ class ActionIdentity:
     def __post_init__(self) -> None:
         if self.schema_version != _ACTION_SCHEMA:
             raise ValueError(f"unsupported action schema: {self.schema_version}")
-        _bounded_text(self.operation_identity, "operation_identity")
-        _bounded_text(self.operation_version, "operation_version")
-        _check_digest_field(self.input_digest, "input_digest")
-        _bounded_text(self.trust_scope, "trust_scope")
+        object.__setattr__(
+            self, "operation_identity", _bounded_text(self.operation_identity, "operation_identity")
+        )
+        object.__setattr__(
+            self, "operation_version", _bounded_text(self.operation_version, "operation_version")
+        )
+        object.__setattr__(
+            self, "input_digest", _check_digest_field(self.input_digest, "input_digest")
+        )
+        object.__setattr__(self, "trust_scope", _bounded_text(self.trust_scope, "trust_scope"))
         object.__setattr__(self, "side_effect_class", SideEffectClass(self.side_effect_class))
         object.__setattr__(self, "environment", _string_mapping(self.environment, "environment"))
         object.__setattr__(self, "freshness", _string_mapping(self.freshness, "freshness"))
@@ -181,7 +187,11 @@ class ActionIdentity:
         if len(dependency_ids) != len(self.dependencies):
             raise ValueError("duplicate dependency identity")
         if self.authorization_scope_digest is not None:
-            _check_digest_field(self.authorization_scope_digest, "authorization_scope_digest")
+            object.__setattr__(
+                self,
+                "authorization_scope_digest",
+                _check_digest_field(self.authorization_scope_digest, "authorization_scope_digest"),
+            )
         object.__setattr__(
             self,
             "validator_identity",
@@ -289,9 +299,13 @@ class ReuseReceipt:
     def __post_init__(self) -> None:
         if self.schema_version != _RECEIPT_SCHEMA:
             raise ValueError(f"unsupported receipt schema: {self.schema_version}")
-        _check_digest_field(self.result_digest, "result_digest")
-        _bounded_text(self.media_type, "media_type")
-        _bounded_text(self.producer_identity, "producer_identity")
+        object.__setattr__(
+            self, "result_digest", _check_digest_field(self.result_digest, "result_digest")
+        )
+        object.__setattr__(self, "media_type", _bounded_text(self.media_type, "media_type"))
+        object.__setattr__(
+            self, "producer_identity", _bounded_text(self.producer_identity, "producer_identity")
+        )
         object.__setattr__(self, "reuse_class", ReuseClass(self.reuse_class))
         if not isinstance(self.created_at, datetime) or self.created_at.tzinfo is None:
             raise ValueError("created_at must include a timezone")
@@ -322,8 +336,8 @@ class ReuseReceipt:
             _string_mapping(self.execution_metadata, "execution_metadata"),
         )
         object.__setattr__(self, "economics", _string_mapping(self.economics, "economics"))
-        _bounded_text(self.trust_scope, "trust_scope")
-        _bounded_text(self.cache_scope, "cache_scope")
+        object.__setattr__(self, "trust_scope", _bounded_text(self.trust_scope, "trust_scope"))
+        object.__setattr__(self, "cache_scope", _bounded_text(self.cache_scope, "cache_scope"))
         object.__setattr__(
             self, "result_reference", _optional_text(self.result_reference, "result_reference")
         )
@@ -592,10 +606,20 @@ class ReceiptTrustPolicy:
     required_provenance: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        for producer in self.allowed_producers:
-            _bounded_text(producer, "allowed producer")
-        for scope in self.allowed_cache_scopes:
-            _bounded_text(scope, "allowed cache scope")
+        object.__setattr__(
+            self,
+            "allowed_producers",
+            frozenset(
+                _bounded_text(producer, "allowed producer") for producer in self.allowed_producers
+            ),
+        )
+        object.__setattr__(
+            self,
+            "allowed_cache_scopes",
+            frozenset(
+                _bounded_text(scope, "allowed cache scope") for scope in self.allowed_cache_scopes
+            ),
+        )
         object.__setattr__(
             self,
             "required_provenance",

@@ -167,16 +167,21 @@ def main() -> int:
         != document["canonicalization"]["utf8_key_order_digest"]
     ):
         return 5
-    if not all("expected_state" in case for case in document["cases"]):
+    if (
+        hashlib.sha256(canonical(document["canonicalization"]["prototype_key_object"])).hexdigest()
+        != document["canonicalization"]["prototype_key_object_digest"]
+    ):
         return 6
+    if not all("expected_state" in case for case in document["cases"]):
+        return 7
     for item in document["timestamp_cases"]:
         try:
             actual = canonical_timestamp(item["value"])
             if not item["accepted"] or actual != item.get("canonical", actual):
-                return 7
+                return 8
         except (TypeError, ValueError):
             if item["accepted"]:
-                return 8
+                return 9
     for item in document["raw_json_cases"]:
         try:
             parse_object(item["json"])
@@ -184,7 +189,7 @@ def main() -> int:
         except (TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError):
             accepted = False
         if accepted is not item["accepted"]:
-            return 9
+            return 10
     print(f"stdlib vectors: {len(document['cases'])} cases; digests and ingress guards verified")
     return 0
 

@@ -26,8 +26,10 @@ complete. The same rule applies to the CLI and all other consumers.
 The adapter's verifier has no trusted producer by default. A caller that wants
 an authoritative `REUSABLE_EXACT` observation must pass a
 `ReceiptTrustPolicy` binding the expected MCP producer and cache scope. Numeric
-tool arguments are rejected by the canonicalizer rather than hashed with
-language-specific number rules.
+tool arguments and numeric tool results are rejected by the canonicalizer rather
+than hashed with language-specific number rules. An integration that needs
+numeric MCP inputs or outputs must provide a separate deterministic digest
+contract instead of relying on the reference adapter's generic canonicalizer.
 
 Every `forward` call executes the supplied tool. The adapter never suppresses a
 call, never turns a receipt into a cache hit, and never supplies idempotency for

@@ -47,6 +47,11 @@ language-specific JSON-number behavior. The optional MCP shadow adapter
 therefore fails closed for numeric tool arguments unless the caller supplies
 an input digest under another explicitly specified contract.
 
+Implementations MUST retain each accepted protocol string in its
+NFC-normalized form before performing decision comparisons, policy admission,
+or dependency identity comparisons. NFC-equivalent wire spellings therefore
+identify the same decision-semantic object as well as the same canonical digest.
+
 An implementation MUST reject a canonical key collision such as two keys that
 become equal after NFC normalization. It MUST NOT resolve the collision by
 choosing one value.
