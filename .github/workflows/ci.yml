@@ -56,6 +56,17 @@ jobs:
       - run: go -C implementations/go vet ./...
       - run: go -C implementations/go run ./cmd/conformance ../../conformance/vectors.json
 
+  dotnet:
+    name: .NET conformance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: "8.0.x"
+      - run: dotnet build implementations/dotnet/Oncefold.DotNet.csproj --nologo
+      - run: dotnet run --project implementations/dotnet/Oncefold.DotNet.csproj --no-build -- conformance conformance/vectors.json
+
   package:
     name: Python package artifacts
     runs-on: ubuntu-latest

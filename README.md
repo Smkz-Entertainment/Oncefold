@@ -114,6 +114,8 @@ attestation. See [`docs/MCP_INTEROP.md`](docs/MCP_INTEROP.md).
   consumer, not a full SDK.
 - Go in `implementations/go/` is an independent conformance consumer, not a
   full SDK.
+- .NET in `implementations/dotnet/` is an independent conformance consumer,
+  not a full SDK.
 - The language-neutral corpus is in `conformance/vectors.json` (60 decision
   cases plus shared ingress fixtures).
 
@@ -124,6 +126,7 @@ python conformance/stdlib_check.py
 python -m pytest
 node --experimental-strip-types implementations/typescript/run_conformance.ts conformance/vectors.json
 go -C implementations/go run ./cmd/conformance ../../conformance/vectors.json
+dotnet run --project implementations/dotnet/Oncefold.DotNet.csproj -- conformance conformance/vectors.json
 ```
 
 The protocol, schemas, and vectors are intended to be sufficient for a new

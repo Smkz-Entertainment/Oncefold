@@ -33,10 +33,12 @@ npm run typecheck
 node --experimental-strip-types implementations/typescript/run_conformance.ts conformance/vectors.json
 go -C implementations/go test ./...
 go -C implementations/go run ./cmd/conformance ../../conformance/vectors.json
+dotnet run --project implementations/dotnet/Oncefold.DotNet.csproj -- conformance conformance/vectors.json
 ```
 
-The Python, TypeScript, and Go consumers are intentionally independent. A
-protocol change is not complete until the vectors and all three implementations
-agree. Vectors must not be weakened to make one implementation pass; an actual
+The TypeScript, Go, and .NET consumers are intentionally independent of the
+Python reference. A protocol change is not complete until the vectors and all
+four implementations agree. Vectors must not be weakened to make one
+implementation pass; an actual
 ambiguity requires a documented protocol decision, a regression case, and a
 fresh parity run.
