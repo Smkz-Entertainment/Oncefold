@@ -4,8 +4,8 @@ Oncefold ships one language-neutral JSON corpus at
 [`../conformance/vectors.json`](../conformance/vectors.json). The corpus has 60
 cases covering exact reuse, direct and transitive dependency changes, unrelated
 changes, tool and validator changes, freshness, scope, revocation, result
-integrity, incomplete declarations, malformed fields, Unicode NFC, advisory
-  and verified classes, and duplicate dependencies.
+integrity, incomplete declarations, malformed fields, Unicode NFC, advisory and
+verified classes, and duplicate dependencies.
 
 The document also carries shared timestamp, duplicate-key, number-rejection,
 invalid-Unicode/line-separator, prototype-key, and exact-depth ingress cases.
@@ -39,6 +39,5 @@ dotnet run --project implementations/dotnet/Oncefold.DotNet.csproj -- conformanc
 The TypeScript, Go, and .NET consumers are intentionally independent of the
 Python reference. A protocol change is not complete until the vectors and all
 four implementations agree. Vectors must not be weakened to make one
-implementation pass; an actual
-ambiguity requires a documented protocol decision, a regression case, and a
-fresh parity run.
+implementation pass; an actual ambiguity requires a documented protocol
+decision, a regression case, and a fresh parity run.

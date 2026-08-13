@@ -68,7 +68,7 @@ The required fields are:
 
 - `schema_version`: exactly `oncefold.action/1`;
 - `operation_identity`: stable tool/action identity;
-- `operation_version`: version of the operation contract; and
+- `operation_version`: version of the operation contract;
 - `input_digest`: lowercase SHA-256 digest of canonicalized inputs;
 - `dependency_completeness`: an explicit boolean completeness assertion.
 

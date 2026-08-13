@@ -16,4 +16,4 @@ decision.
 
 ## Conformance impact
 
-List schema changes, vectors, and Python/TypeScript/Go parity work.
+List schema changes, vectors, and Python/TypeScript/Go/.NET parity work.

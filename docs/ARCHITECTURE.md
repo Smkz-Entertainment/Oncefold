@@ -35,7 +35,7 @@ provenance admission before an authoritative reuse result is possible.
 `SQLiteReceiptStore` and `InMemoryReceiptStore` demonstrate the store contract.
 `oncefold.mcp_shadow` demonstrates how a completed MCP-shaped `tools/call` can
 produce and later evaluate receipts while still forwarding the underlying call.
-The TypeScript and Go directories are independent conformance consumers.
+The TypeScript, Go, and .NET directories are independent conformance consumers.
 
 These components are replaceable examples, not a distributed cache or required
 runtime architecture.

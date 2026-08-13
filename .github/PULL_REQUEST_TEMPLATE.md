@@ -7,8 +7,12 @@
 - [ ] `ruff check .`
 - [ ] `ruff format --check .`
 - [ ] `mypy src`
+- [ ] Standard-library corpus check
 - [ ] TypeScript conformance
 - [ ] Go conformance
+- [ ] .NET conformance
+- [ ] Package artifact build/install check, when packaging changes
+- [ ] Documentation/link audit, when documentation changes
 
 ## Safety and scope
 
