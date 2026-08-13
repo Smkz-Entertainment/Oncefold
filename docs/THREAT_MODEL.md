@@ -41,7 +41,7 @@ Oncefold treats producer claims and tool output as untrusted evidence.
 
 ## Accepted gaps
 
-The pre-1.0 candidate does not authenticate remote publishers, sign receipts,
+The pre-1.0 protocol does not authenticate remote publishers, sign receipts,
 prove complete dependency closure, isolate hostile tenants on a shared host,
 verify semantic correctness of arbitrary outputs, or provide durable
 distributed result transport after process failure. A trust policy binds a

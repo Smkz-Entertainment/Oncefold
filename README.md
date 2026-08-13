@@ -9,7 +9,7 @@ dependencies, scope, validator rules, revocation state, and result integrity.
 Oncefold is not a general-purpose agent cache and does not make arbitrary
 AI-generated output trustworthy.
 
-> **Experimental pre-1.0 candidate.** The protocol and Python implementation are
+> **Experimental pre-1.0 protocol.** The protocol and Python implementation are
 > suitable for review, local integration, and conformance work. They are not a
 > public trust service, signed attestation system, or production shared cache.
 
@@ -136,7 +136,7 @@ artifacts so independent consumers can use them without importing Python.
 
 ## Maturity and research conclusion
 
-This is a pre-1.0 protocol candidate. It has bounded cross-language conformance,
+This is an experimental pre-1.0 protocol. It has bounded cross-language conformance,
 storage-independent verification, fail-closed negative controls, and a reference
 MCP integration. It does not have authenticated public publishers, complete
 dependency discovery, tenant isolation, or a live reuse canary.

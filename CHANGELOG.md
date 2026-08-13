@@ -4,7 +4,7 @@
 
 This release establishes Oncefold's experimental pre-1.0 protocol baseline.
 
-- Candidate baseline for the Oncefold Action Identity, Reuse Receipt, and
+- Baseline for the Oncefold Action Identity, Reuse Receipt, and
   deterministic Reuse Decision protocol.
 - Added Python reference verification, JSON schemas, and a language-neutral
   60-case conformance corpus with raw-ingress fixtures.
