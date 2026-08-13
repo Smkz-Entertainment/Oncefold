@@ -15,13 +15,13 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - run: python -m pip install --upgrade pip
-      - run: python -m pip install -e ".[dev]"
+      - run: python -m pip install -c .github/ci-constraints.txt -e ".[dev]"
       - run: python conformance/stdlib_check.py
       - run: ruff check .
       - run: ruff format --check .
@@ -34,21 +34,66 @@ jobs:
     name: TypeScript conformance
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck
       - run: node --experimental-strip-types implementations/typescript/run_conformance.ts conformance/vectors.json
 
   go:
     name: Go conformance
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: "1.22"
       - shell: bash
         run: test -z "$(gofmt -d implementations/go/verifier/verifier.go implementations/go/cmd/conformance/main.go)"
+      - run: go -C implementations/go test ./...
       - run: go -C implementations/go vet ./...
       - run: go -C implementations/go run ./cmd/conformance ../../conformance/vectors.json
+
+  package:
+    name: Python package artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install -c .github/ci-constraints.txt build twine
+      - run: python -m build --outdir dist
+      - run: python -m twine check dist/*
+      - name: Inspect artifact contents
+        shell: bash
+        run: |
+          python - <<'PY'
+          import tarfile
+          import zipfile
+          from pathlib import Path
+
+          artifacts = list(Path("dist").iterdir())
+          assert len(artifacts) == 2, artifacts
+          wheel = next(path for path in artifacts if path.suffix == ".whl")
+          sdist = next(path for path in artifacts if path.suffix == ".gz")
+          with zipfile.ZipFile(wheel) as archive:
+              names = set(archive.namelist())
+              assert "oncefold/py.typed" in names
+              assert "oncefold-0.1.0.dist-info/licenses/LICENSE" in names
+              assert "oncefold-0.1.0.dist-info/licenses/NOTICE" in names
+          with tarfile.open(sdist) as archive:
+              names = set(archive.getnames())
+              assert any(name.endswith("/pyproject.toml") for name in names)
+              assert any(name.endswith("/LICENSE") for name in names)
+              assert any(name.endswith("/NOTICE") for name in names)
+          PY
+      - name: Install wheel outside the source tree
+        shell: bash
+        run: |
+          python -m venv "$RUNNER_TEMP/oncefold-wheel"
+          "$RUNNER_TEMP/oncefold-wheel/bin/python" -m pip install --no-deps dist/oncefold-0.1.0-py3-none-any.whl
+          "$RUNNER_TEMP/oncefold-wheel/bin/python" -c 'import oncefold; assert oncefold.__version__ == "0.1.0"; print(oncefold.__file__)'
+          "$RUNNER_TEMP/oncefold-wheel/bin/oncefold" --help

@@ -12,6 +12,7 @@ from oncefold.protocol import (
     ActionIdentity,
     DecisionState,
     InMemoryReceiptStore,
+    ReceiptTrustPolicy,
     ReceiptVerifier,
     ReuseReceipt,
     SQLiteReceiptStore,
@@ -33,6 +34,7 @@ def make_action(**changes: object) -> ActionIdentity:
         "side_effect_class": SideEffectClass.READ_ONLY,
         "authorization_scope_digest": digest("read:catalog"),
         "freshness": {"time_bucket": "2026-08-11T12"},
+        "dependency_completeness": True,
         "validator_identity": "validator/1",
     }
     values.update(changes)
@@ -57,6 +59,12 @@ def make_receipt(action: ActionIdentity, **changes: object) -> ReuseReceipt:
     return ReuseReceipt(**values)  # type: ignore[arg-type]
 
 
+def trust_policy() -> ReceiptTrustPolicy:
+    return ReceiptTrustPolicy.for_producer(
+        "producer-a", "tenant-private", required_provenance={"path": "cli"}
+    )
+
+
 def test_receipt_is_portable_and_strictly_self_verifying() -> None:
     receipt = make_receipt(make_action())
     encoded = receipt.as_dict()
@@ -75,7 +83,7 @@ def test_duplicate_dependencies_and_non_read_only_actions_fail_closed() -> None:
     action = make_action(side_effect_class=SideEffectClass.LOCAL_WRITE)
     receipt = make_receipt(action)
     assert (
-        ReceiptVerifier(InMemoryReceiptStore()).evaluate(action, receipt).state
+        ReceiptVerifier(InMemoryReceiptStore(), trust_policy()).evaluate(action, receipt).state
         is DecisionState.UNSAFE
     )
 
@@ -85,7 +93,7 @@ def test_verifier_fails_closed_for_dependency_scope_and_result_changes() -> None
     action = make_action()
     receipt = make_receipt(action)
     store.put(receipt)
-    verifier = ReceiptVerifier(store)
+    verifier = ReceiptVerifier(store, trust_policy())
     assert verifier.evaluate(action, receipt).state is DecisionState.REUSABLE_EXACT
     changed_dependency = replace(
         action,
@@ -123,7 +131,7 @@ def test_verifier_distinguishes_advisory_verified_and_revoked() -> None:
     store = InMemoryReceiptStore()
     store.put(advisory)
     store.put(verified)
-    verifier = ReceiptVerifier(store)
+    verifier = ReceiptVerifier(store, trust_policy())
     assert verifier.evaluate(action, advisory).state is DecisionState.ADVISORY_ONLY
     assert verifier.evaluate(action, verified).state is DecisionState.REQUIRES_VALIDATION
     missing_validator = make_receipt(
@@ -156,6 +164,6 @@ def test_same_verifier_contract_works_with_memory_and_sqlite(tmp_path: Path) -> 
     for store in (memory, sqlite):
         store.put(receipt)
         assert (
-            ReceiptVerifier(store).evaluate_digest(action, receipt.digest).state
+            ReceiptVerifier(store, trust_policy()).evaluate_digest(action, receipt.digest).state
             is DecisionState.REUSABLE_EXACT
         )

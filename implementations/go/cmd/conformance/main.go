@@ -10,11 +10,20 @@ import (
 )
 
 type vectorDocument struct {
+	Canonicalization struct {
+		UTF8KeyOrder             map[string]any `json:"utf8_key_order"`
+		UTF8KeyOrderDigest       string         `json:"utf8_key_order_digest"`
+		PrototypeKeyObject       map[string]any `json:"prototype_key_object"`
+		PrototypeKeyObjectDigest string         `json:"prototype_key_object_digest"`
+	} `json:"canonicalization"`
 	Base struct {
 		Action  map[string]any `json:"action"`
 		Receipt map[string]any `json:"receipt"`
 	} `json:"base"`
-	Cases []vectorCase `json:"cases"`
+	Cases        []vectorCase         `json:"cases"`
+	TrustPolicy  verifier.TrustPolicy `json:"trust_policy"`
+	RawJSONCases []rawJSONCase        `json:"raw_json_cases"`
+	Timestamps   []timestampCase      `json:"timestamp_cases"`
 }
 
 type vectorCase struct {
@@ -26,6 +35,18 @@ type vectorCase struct {
 	AvailableResultDigest string         `json:"available_result_digest"`
 	ValidatorResult       *bool          `json:"validator_result"`
 	ExpectedState         string         `json:"expected_state"`
+}
+
+type rawJSONCase struct {
+	ID       string `json:"id"`
+	JSON     string `json:"json"`
+	Accepted bool   `json:"accepted"`
+}
+
+type timestampCase struct {
+	Value     string `json:"value"`
+	Accepted  bool   `json:"accepted"`
+	Canonical string `json:"canonical"`
 }
 
 func merge(base, patch map[string]any) (map[string]any, error) {
@@ -50,11 +71,46 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	value, err := verifier.ParseJSON(data)
+	if err != nil {
+		panic(err)
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		panic(err)
+	}
 	var document vectorDocument
-	if err := json.Unmarshal(data, &document); err != nil {
+	if err := json.Unmarshal(encoded, &document); err != nil {
 		panic(err)
 	}
 	failures := []string{}
+	keyOrderDigest, digestErr := verifier.SHA256Canonical(document.Canonicalization.UTF8KeyOrder)
+	if digestErr != nil || keyOrderDigest != document.Canonicalization.UTF8KeyOrderDigest {
+		failures = append(failures, "canonicalization: UTF-8 key order digest mismatch")
+	}
+	prototypeKeyDigest, digestErr := verifier.SHA256Canonical(document.Canonicalization.PrototypeKeyObject)
+	if digestErr != nil || prototypeKeyDigest != document.Canonicalization.PrototypeKeyObjectDigest {
+		failures = append(failures, "canonicalization: prototype-key digest mismatch")
+	}
+	for _, item := range document.Timestamps {
+		actual, timestampErr := verifier.CanonicalTimestamp(item.Value)
+		if timestampErr != nil {
+			if item.Accepted {
+				failures = append(failures, fmt.Sprintf("timestamp rejected %s", item.Value))
+			}
+			continue
+		}
+		if !item.Accepted || (item.Canonical != "" && actual != item.Canonical) {
+			failures = append(failures, fmt.Sprintf("timestamp %s", item.Value))
+		}
+	}
+	for _, item := range document.RawJSONCases {
+		_, parseErr := verifier.ParseJSON([]byte(item.JSON))
+		accepted := parseErr == nil
+		if accepted != item.Accepted {
+			failures = append(failures, fmt.Sprintf("raw JSON %s", item.ID))
+		}
+	}
 	for _, item := range document.Cases {
 		actual := verifier.Unknown
 		actionPayload, actionErr := merge(document.Base.Action, item.ActionPatch)
@@ -63,7 +119,7 @@ func main() {
 			action, parseActionErr := verifier.ParseAction(actionPayload)
 			receipt, parseReceiptErr := verifier.ParseReceipt(receiptPayload, false)
 			if parseActionErr == nil && parseReceiptErr == nil {
-				actual = verifier.Evaluate(action, receipt, item.Revoked, item.AvailableResultDigest, item.ValidatorResult).State
+				actual = verifier.Evaluate(action, receipt, item.Revoked, item.AvailableResultDigest, item.ValidatorResult, document.TrustPolicy).State
 			}
 		}
 		if actual != item.ExpectedState {
@@ -71,7 +127,7 @@ func main() {
 		}
 	}
 	output := map[string]any{"implementation": "go-independent", "total": len(document.Cases), "passed": len(document.Cases) - len(failures), "failures": failures}
-	encoded, _ := json.MarshalIndent(output, "", "  ")
+	encoded, _ = json.MarshalIndent(output, "", "  ")
 	fmt.Println(string(encoded))
 	if len(failures) > 0 {
 		os.Exit(1)

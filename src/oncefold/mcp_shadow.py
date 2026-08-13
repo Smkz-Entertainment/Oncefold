@@ -18,6 +18,7 @@ from oncefold.protocol import (
     ActionIdentity,
     DecisionState,
     ReceiptStore,
+    ReceiptTrustPolicy,
     ReceiptVerifier,
     ReuseDecision,
     ReuseReceipt,
@@ -40,9 +41,9 @@ class ShadowObservation:
 class MCPShadowProxy:
     """Observe equivalent tools/call requests while always forwarding the real call."""
 
-    def __init__(self, store: ReceiptStore) -> None:
+    def __init__(self, store: ReceiptStore, trust_policy: ReceiptTrustPolicy | None = None) -> None:
         self.store = store
-        self.verifier = ReceiptVerifier(store)
+        self.verifier = ReceiptVerifier(store, trust_policy)
         self._by_action: dict[str, str] = {}
 
     @staticmethod
@@ -69,7 +70,7 @@ class MCPShadowProxy:
         environment: Mapping[str, str] = {},
         authorization_scope_digest: str | None = None,
         validator_identity: str | None = None,
-        dependency_completeness: bool = True,
+        dependency_completeness: bool = False,
     ) -> ActionIdentity:
         name, arguments = self._call_parts(request)
         return ActionIdentity(
@@ -127,7 +128,7 @@ class MCPShadowProxy:
         producer_identity: str = "mcp-server",
         validator_identity: str | None = None,
         cache_scope: str = "private",
-        dependency_completeness: bool = True,
+        dependency_completeness: bool = False,
         created_at: datetime | None = None,
     ) -> ShadowObservation:
         action = self.action_for_request(
@@ -176,7 +177,7 @@ class MCPShadowProxy:
         dependencies: Sequence[DependencyDescriptor] = (),
         environment: Mapping[str, str] = {},
         authorization_scope_digest: str | None = None,
-        dependency_completeness: bool = True,
+        dependency_completeness: bool = False,
     ) -> ShadowObservation:
         action = self.action_for_request(
             request,
@@ -210,7 +211,7 @@ class MCPShadowProxy:
         producer_identity: str = "mcp-server",
         validator_identity: str | None = None,
         cache_scope: str = "private",
-        dependency_completeness: bool = True,
+        dependency_completeness: bool = False,
     ) -> ShadowObservation:
         prior = self.evaluate_tools_call(
             request,

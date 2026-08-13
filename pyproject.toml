@@ -19,6 +19,7 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Topic :: Software Development :: Libraries",
+  "Typing :: Typed",
 ]
 dependencies = []
 
@@ -31,11 +32,12 @@ Issues = "https://github.com/Smkz-Entertainment/Oncefold/issues"
 [project.optional-dependencies]
 dev = [
   "build>=1.2",
-  "hypothesis>=6.100",
+  "jsonschema>=4.23",
   "mypy>=1.11",
   "pip-audit>=2.7",
   "pytest>=8.0",
   "ruff>=0.6",
+  "twine>=5.1",
 ]
 
 [project.scripts]
@@ -43,6 +45,9 @@ oncefold = "oncefold.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+oncefold = ["py.typed"]
 
 [tool.ruff]
 line-length = 100

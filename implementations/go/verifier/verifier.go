@@ -11,6 +11,7 @@ import (
 	"io"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -24,16 +25,26 @@ const (
 )
 
 var digestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+var timestampPattern = regexp.MustCompile(`^[1-9][0-9]{3}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{6})?Z$`)
+
+const (
+	maxJSONBytes = 1_048_576
+	maxJSONDepth = 32
+)
+
+func containsForbiddenCodePoint(value string) bool {
+	return strings.ContainsRune(value, '\u2028') || strings.ContainsRune(value, '\u2029')
+}
 
 type Action struct {
-	Raw                       map[string]any
-	Digest                    string
-	TrustScope                string
+	Raw                      map[string]any
+	Digest                   string
+	TrustScope               string
 	AuthorizationScopeDigest *string
-	SideEffectClass           string
-	Dependencies              []map[string]any
-	DependencyCompleteness    bool
-	ValidatorIdentity         *string
+	SideEffectClass          string
+	Dependencies             []map[string]any
+	DependencyCompleteness   bool
+	ValidatorIdentity        *string
 }
 
 type Receipt struct {
@@ -46,6 +57,15 @@ type Receipt struct {
 	RevocationRef      *string
 	ValidatorIdentity  *string
 	DependencySnapshot []map[string]any
+	CacheScope         string
+	ProducerIdentity   string
+	Provenance         map[string]any
+}
+
+type TrustPolicy struct {
+	AllowedProducers   []string          `json:"allowed_producers"`
+	AllowedCacheScopes []string          `json:"allowed_cache_scopes"`
+	RequiredProvenance map[string]string `json:"required_provenance"`
 }
 
 type Decision struct {
@@ -87,6 +107,12 @@ func normalize(value any, depth int) (any, error) {
 	case nil, bool:
 		return typed, nil
 	case string:
+		if !utf8.ValidString(typed) {
+			return nil, fmt.Errorf("canonical string is not valid UTF-8")
+		}
+		if containsForbiddenCodePoint(typed) {
+			return nil, fmt.Errorf("canonical string contains a prohibited line-separator code point")
+		}
 		if utf8.RuneCountInString(typed) > 4096 {
 			return nil, fmt.Errorf("canonical string exceeds bound")
 		}
@@ -96,13 +122,8 @@ func normalize(value any, depth int) (any, error) {
 			}
 		}
 		return norm.NFC.String(typed), nil
-	case json.Number:
-		if typed.String() == "" {
-			return nil, fmt.Errorf("empty number")
-		}
-		return typed, nil
-	case float64:
-		return typed, nil
+	case json.Number, float64:
+		return nil, fmt.Errorf("numbers are not canonicalizable; supply an opaque input digest")
 	case []any:
 		if len(typed) > 256 {
 			return nil, fmt.Errorf("canonical array exceeds bound")
@@ -122,7 +143,21 @@ func normalize(value any, depth int) (any, error) {
 		}
 		result := make(map[string]any, len(typed))
 		for key, item := range typed {
+			if !utf8.ValidString(key) {
+				return nil, fmt.Errorf("canonical object key is not valid UTF-8")
+			}
 			cleanKey := norm.NFC.String(key)
+			if containsForbiddenCodePoint(cleanKey) {
+				return nil, fmt.Errorf("canonical object key contains a prohibited line-separator code point")
+			}
+			if utf8.RuneCountInString(cleanKey) > 4096 {
+				return nil, fmt.Errorf("canonical object key exceeds bound")
+			}
+			for _, character := range cleanKey {
+				if character < 0x20 {
+					return nil, fmt.Errorf("canonical object key contains control character")
+				}
+			}
 			if _, exists := result[cleanKey]; exists {
 				return nil, fmt.Errorf("canonical key collision")
 			}
@@ -147,16 +182,169 @@ func SHA256Canonical(value any) (string, error) {
 	return hex.EncodeToString(digest[:]), nil
 }
 
-func decodeObject(data []byte) (map[string]any, error) {
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.UseNumber()
-	var value any
-	if err := decoder.Decode(&value); err != nil {
+func validateJSONText(data []byte) error {
+	if len(data) > maxJSONBytes {
+		return fmt.Errorf("JSON input exceeds %d bytes", maxJSONBytes)
+	}
+	if !utf8.Valid(data) {
+		return fmt.Errorf("JSON input is not valid UTF-8")
+	}
+	depth := 0
+	inString := false
+	escaped := false
+	for index := 0; index < len(data); index++ {
+		character := data[index]
+		if inString {
+			if escaped {
+				if character == 'u' {
+					if index+4 >= len(data) {
+						return fmt.Errorf("truncated Unicode escape")
+					}
+					code, err := strconv.ParseUint(string(data[index+1:index+5]), 16, 16)
+					if err != nil {
+						return fmt.Errorf("invalid Unicode escape")
+					}
+					if code >= 0xDC00 && code <= 0xDFFF {
+						return fmt.Errorf("unpaired Unicode surrogate")
+					}
+					if code >= 0xD800 && code <= 0xDBFF {
+						if index+11 >= len(data) || data[index+5] != '\\' || data[index+6] != 'u' {
+							return fmt.Errorf("unpaired Unicode surrogate")
+						}
+						low, err := strconv.ParseUint(string(data[index+7:index+11]), 16, 16)
+						if err != nil || low < 0xDC00 || low > 0xDFFF {
+							return fmt.Errorf("unpaired Unicode surrogate")
+						}
+						index += 10
+					} else {
+						index += 4
+					}
+				}
+				escaped = false
+				continue
+			}
+			if character == '\\' {
+				escaped = true
+			} else if character == '"' {
+				inString = false
+			}
+			continue
+		}
+		if character == '"' {
+			inString = true
+		} else if character == '{' || character == '[' {
+			depth++
+			if depth > maxJSONDepth {
+				return fmt.Errorf("JSON nesting exceeds the input bound")
+			}
+		} else if character == '}' || character == ']' {
+			depth--
+			if depth < 0 {
+				return fmt.Errorf("malformed JSON nesting")
+			}
+		}
+	}
+	return nil
+}
+
+func decodeValue(decoder *json.Decoder, depth int) (any, error) {
+	token, err := decoder.Token()
+	if err != nil {
 		return nil, err
 	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
+	switch typed := token.(type) {
+	case json.Delim:
+		if depth > maxJSONDepth {
+			return nil, fmt.Errorf("JSON nesting exceeds the input bound")
+		}
+		switch typed {
+		case '{':
+			result := map[string]any{}
+			for decoder.More() {
+				keyToken, err := decoder.Token()
+				if err != nil {
+					return nil, err
+				}
+				key, ok := keyToken.(string)
+				if !ok {
+					return nil, fmt.Errorf("JSON object key must be a string")
+				}
+				if containsForbiddenCodePoint(key) {
+					return nil, fmt.Errorf("JSON object key contains a prohibited line-separator code point")
+				}
+				if _, exists := result[key]; exists {
+					return nil, fmt.Errorf("duplicate JSON object key: %s", key)
+				}
+				value, err := decodeValue(decoder, depth+1)
+				if err != nil {
+					return nil, err
+				}
+				result[key] = value
+				if len(result) > 256 {
+					return nil, fmt.Errorf("JSON object exceeds the input bound")
+				}
+			}
+			end, err := decoder.Token()
+			if err != nil || end != json.Delim('}') {
+				return nil, fmt.Errorf("malformed JSON object")
+			}
+			return result, nil
+		case '[':
+			result := []any{}
+			for decoder.More() {
+				value, err := decodeValue(decoder, depth+1)
+				if err != nil {
+					return nil, err
+				}
+				result = append(result, value)
+				if len(result) > 256 {
+					return nil, fmt.Errorf("JSON array exceeds the input bound")
+				}
+			}
+			end, err := decoder.Token()
+			if err != nil || end != json.Delim(']') {
+				return nil, fmt.Errorf("malformed JSON array")
+			}
+			return result, nil
+		default:
+			return nil, fmt.Errorf("unexpected JSON delimiter")
+		}
+	case json.Number:
+		return nil, fmt.Errorf("numbers are not accepted in Oncefold JSON ingress")
+	case string:
+		if containsForbiddenCodePoint(typed) {
+			return nil, fmt.Errorf("JSON string contains a prohibited line-separator code point")
+		}
+		return typed, nil
+	case bool, nil:
+		return typed, nil
+	default:
+		return nil, fmt.Errorf("unsupported JSON value %T", token)
+	}
+}
+
+// ParseJSON parses one bounded JSON document while rejecting duplicate keys,
+// numbers, excessive nesting, and invalid Unicode surrogate sequences.
+func ParseJSON(data []byte) (any, error) {
+	if err := validateJSONText(data); err != nil {
+		return nil, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	value, err := decodeValue(decoder, 1)
+	if err != nil {
+		return nil, err
+	}
+	if extra, err := decoder.Token(); err != io.EOF || extra != nil {
 		return nil, fmt.Errorf("trailing JSON")
+	}
+	return value, nil
+}
+
+func decodeObject(data []byte) (map[string]any, error) {
+	value, err := ParseJSON(data)
+	if err != nil {
+		return nil, err
 	}
 	object, ok := value.(map[string]any)
 	if !ok {
@@ -183,23 +371,34 @@ func allowed(value map[string]any, required, optional []string, name string) err
 	return nil
 }
 
-func stringValue(value any, name string, optional bool) (string, *string, error) {
+func stringValue(value any, name string, optional bool, maxLengths ...int) (string, *string, error) {
 	if value == nil && optional {
 		return "", nil, nil
 	}
 	text, ok := value.(string)
-	if !ok || (!optional && text == "") || utf8.RuneCountInString(text) > 4096 {
+	if !ok {
 		return "", nil, fmt.Errorf("%s must be a bounded string", name)
 	}
-	for _, character := range text {
+	if !utf8.ValidString(text) {
+		return "", nil, fmt.Errorf("%s must be a bounded string", name)
+	}
+	normalized := norm.NFC.String(text)
+	maxLength := 4096
+	if len(maxLengths) > 0 {
+		maxLength = maxLengths[0]
+	}
+	if (!optional && normalized == "") || !utf8.ValidString(normalized) || containsForbiddenCodePoint(normalized) || utf8.RuneCountInString(normalized) > maxLength {
+		return "", nil, fmt.Errorf("%s must be a bounded string", name)
+	}
+	for _, character := range normalized {
 		if character < 0x20 {
 			return "", nil, fmt.Errorf("%s contains a control character", name)
 		}
 	}
 	if optional {
-		return "", &text, nil
+		return "", &normalized, nil
 	}
-	return text, nil, nil
+	return normalized, nil, nil
 }
 
 func requiredDigest(value any, name string) (string, error) {
@@ -211,20 +410,24 @@ func requiredDigest(value any, name string) (string, error) {
 }
 
 func stringMap(value any, name string) (map[string]any, error) {
-	if value == nil {
-		value = map[string]any{}
-	}
 	source, ok := value.(map[string]any)
 	if !ok || len(source) > 256 {
 		return nil, fmt.Errorf("%s must be a bounded map", name)
 	}
 	result := make(map[string]any, len(source))
 	for key, item := range source {
-		text, _, err := stringValue(item, name+"."+key, false)
+		normalizedKey, _, err := stringValue(key, name+" key", false)
 		if err != nil {
 			return nil, err
 		}
-		result[key] = text
+		if _, exists := result[normalizedKey]; exists {
+			return nil, fmt.Errorf("%s keys collide after NFC normalization", name)
+		}
+		text, _, err := stringValue(item, name+"."+normalizedKey, false)
+		if err != nil {
+			return nil, err
+		}
+		result[normalizedKey] = text
 	}
 	return result, nil
 }
@@ -237,7 +440,7 @@ func parseDependency(value any) (map[string]any, error) {
 	if err := allowed(source, []string{"kind", "identity", "digest"}, []string{"required"}, "dependency"); err != nil {
 		return nil, err
 	}
-	kind, _, err := stringValue(source["kind"], "dependency.kind", false)
+	kind, _, err := stringValue(source["kind"], "dependency.kind", false, 128)
 	if err != nil {
 		return nil, err
 	}
@@ -280,7 +483,17 @@ func parseDependencies(value any, name string) ([]map[string]any, error) {
 		result = append(result, parsed)
 	}
 	sort.Slice(result, func(left, right int) bool {
-		return fmt.Sprintf("%s:%s:%s", result[left]["kind"], result[left]["identity"], result[left]["digest"]) < fmt.Sprintf("%s:%s:%s", result[right]["kind"], result[right]["identity"], result[right]["digest"])
+		leftKind := result[left]["kind"].(string)
+		rightKind := result[right]["kind"].(string)
+		if leftKind != rightKind {
+			return leftKind < rightKind
+		}
+		leftIdentity := result[left]["identity"].(string)
+		rightIdentity := result[right]["identity"].(string)
+		if leftIdentity != rightIdentity {
+			return leftIdentity < rightIdentity
+		}
+		return result[left]["digest"].(string) < result[right]["digest"].(string)
 	})
 	return result, nil
 }
@@ -301,8 +514,53 @@ func optionalText(value any, name string) (*string, error) {
 	return text, err
 }
 
+// CanonicalTimestamp accepts only UTC RFC 3339 values with optional six-digit
+// fractions and normalizes an all-zero fraction away.
+func CanonicalTimestamp(value string) (string, error) {
+	if !timestampPattern.MatchString(value) {
+		return "", fmt.Errorf("created_at must be RFC 3339 UTC with Z and optional six-digit fractions")
+	}
+	base := value[:19] + "Z"
+	if _, err := time.Parse("2006-01-02T15:04:05Z", base); err != nil {
+		return "", err
+	}
+	if len(value) == 20 || strings.Trim(value[20:26], "0") == "" {
+		return base, nil
+	}
+	return value, nil
+}
+
+func admits(receipt Receipt, policy TrustPolicy) bool {
+	producerAllowed := false
+	for _, producer := range policy.AllowedProducers {
+		if norm.NFC.String(producer) == receipt.ProducerIdentity {
+			producerAllowed = true
+			break
+		}
+	}
+	if !producerAllowed {
+		return false
+	}
+	scopeAllowed := false
+	for _, scope := range policy.AllowedCacheScopes {
+		if norm.NFC.String(scope) == receipt.CacheScope {
+			scopeAllowed = true
+			break
+		}
+	}
+	if !scopeAllowed {
+		return false
+	}
+	for key, value := range policy.RequiredProvenance {
+		if receipt.Provenance[norm.NFC.String(key)] != norm.NFC.String(value) {
+			return false
+		}
+	}
+	return true
+}
+
 func ParseAction(source map[string]any) (Action, error) {
-	if err := allowed(source, []string{"schema_version", "operation_identity", "operation_version", "input_digest"}, []string{"trust_scope", "environment", "dependencies", "side_effect_class", "authorization_scope_digest", "freshness", "dependency_completeness", "validator_identity"}, "action identity"); err != nil {
+	if err := allowed(source, []string{"schema_version", "operation_identity", "operation_version", "input_digest", "dependency_completeness"}, []string{"trust_scope", "environment", "dependencies", "side_effect_class", "authorization_scope_digest", "freshness", "validator_identity"}, "action identity"); err != nil {
 		return Action{}, err
 	}
 	schema, _, err := stringValue(source["schema_version"], "schema_version", false)
@@ -322,17 +580,25 @@ func ParseAction(source map[string]any) (Action, error) {
 		return Action{}, err
 	}
 	trustScope := "local"
-	if source["trust_scope"] != nil {
-		trustScope, _, err = stringValue(source["trust_scope"], "trust_scope", false)
+	if raw, exists := source["trust_scope"]; exists {
+		trustScope, _, err = stringValue(raw, "trust_scope", false)
 		if err != nil {
 			return Action{}, err
 		}
 	}
-	environment, err := stringMap(source["environment"], "environment")
+	environmentValue := any(map[string]any{})
+	if raw, exists := source["environment"]; exists {
+		environmentValue = raw
+	}
+	environment, err := stringMap(environmentValue, "environment")
 	if err != nil {
 		return Action{}, err
 	}
-	dependencyArray, err := defaultArray(source["dependencies"])
+	dependencyArrayValue := any([]any{})
+	if raw, exists := source["dependencies"]; exists {
+		dependencyArrayValue = raw
+	}
+	dependencyArray, err := defaultArray(dependencyArrayValue)
 	if err != nil {
 		return Action{}, err
 	}
@@ -341,8 +607,8 @@ func ParseAction(source map[string]any) (Action, error) {
 		return Action{}, err
 	}
 	sideEffect := "UNKNOWN"
-	if source["side_effect_class"] != nil {
-		sideEffect, _, err = stringValue(source["side_effect_class"], "side_effect_class", false)
+	if raw, exists := source["side_effect_class"]; exists {
+		sideEffect, _, err = stringValue(raw, "side_effect_class", false)
 		if err != nil || !map[string]bool{"READ_ONLY": true, "LOCAL_WRITE": true, "EXTERNAL_MUTATION": true, "UNKNOWN": true}[sideEffect] {
 			return Action{}, fmt.Errorf("unknown side effect class")
 		}
@@ -351,14 +617,18 @@ func ParseAction(source map[string]any) (Action, error) {
 	if err != nil {
 		return Action{}, err
 	}
-	freshness, err := stringMap(source["freshness"], "freshness")
+	freshnessValue := any(map[string]any{})
+	if raw, exists := source["freshness"]; exists {
+		freshnessValue = raw
+	}
+	freshness, err := stringMap(freshnessValue, "freshness")
 	if err != nil {
 		return Action{}, err
 	}
-	complete := true
-	if source["dependency_completeness"] != nil {
+	complete := false
+	if raw, exists := source["dependency_completeness"]; exists {
 		var ok bool
-		complete, ok = source["dependency_completeness"].(bool)
+		complete, ok = raw.(bool)
 		if !ok {
 			return Action{}, fmt.Errorf("dependency_completeness must be boolean")
 		}
@@ -411,10 +681,8 @@ func ParseReceipt(source map[string]any, allowMissingDigest bool) (Receipt, erro
 	if err != nil {
 		return Receipt{}, err
 	}
-	if len(createdAt) < 6 || (!strings.HasSuffix(createdAt, "Z") && !strings.Contains(createdAt[len(createdAt)-6:], ":")) {
-		return Receipt{}, fmt.Errorf("created_at must include timezone")
-	}
-	if _, err := time.Parse(time.RFC3339, createdAt); err != nil {
+	createdAt, err = CanonicalTimestamp(createdAt)
+	if err != nil {
 		return Receipt{}, err
 	}
 	snapshotArray, err := defaultArray(source["dependency_snapshot"])
@@ -445,7 +713,11 @@ func ParseReceipt(source map[string]any, allowMissingDigest bool) (Receipt, erro
 	if err != nil {
 		return Receipt{}, err
 	}
-	provenance, err := stringMap(source["provenance"], "provenance")
+	provenanceValue := any(map[string]any{})
+	if raw, exists := source["provenance"]; exists {
+		provenanceValue = raw
+	}
+	provenance, err := stringMap(provenanceValue, "provenance")
 	if err != nil {
 		return Receipt{}, err
 	}
@@ -457,11 +729,19 @@ func ParseReceipt(source map[string]any, allowMissingDigest bool) (Receipt, erro
 	if err != nil {
 		return Receipt{}, err
 	}
-	execution, err := stringMap(source["execution_metadata"], "execution_metadata")
+	executionValue := any(map[string]any{})
+	if raw, exists := source["execution_metadata"]; exists {
+		executionValue = raw
+	}
+	execution, err := stringMap(executionValue, "execution_metadata")
 	if err != nil {
 		return Receipt{}, err
 	}
-	economics, err := stringMap(source["economics"], "economics")
+	economicsValue := any(map[string]any{})
+	if raw, exists := source["economics"]; exists {
+		economicsValue = raw
+	}
+	economics, err := stringMap(economicsValue, "economics")
 	if err != nil {
 		return Receipt{}, err
 	}
@@ -476,10 +756,10 @@ func ParseReceipt(source map[string]any, allowMissingDigest bool) (Receipt, erro
 			return Receipt{}, fmt.Errorf("receipt digest mismatch")
 		}
 	}
-	return Receipt{Raw: raw, Digest: receiptDigest, Action: action, ResultDigest: resultDigest, ReuseClass: reuseClass, TrustScope: trustScope, RevocationRef: revocation, ValidatorIdentity: validator, DependencySnapshot: snapshot}, nil
+	return Receipt{Raw: raw, Digest: receiptDigest, Action: action, ResultDigest: resultDigest, ReuseClass: reuseClass, TrustScope: trustScope, RevocationRef: revocation, ValidatorIdentity: validator, DependencySnapshot: snapshot, CacheScope: cacheScope, ProducerIdentity: producer, Provenance: provenance}, nil
 }
 
-func Evaluate(action Action, receipt Receipt, revoked bool, availableResultDigest string, validatorResult *bool) Decision {
+func Evaluate(action Action, receipt Receipt, revoked bool, availableResultDigest string, validatorResult *bool, trustPolicy TrustPolicy) Decision {
 	if revoked || receipt.RevocationRef != nil {
 		return Decision{State: Revoked, Reason: "receipt revoked", ReceiptDigest: receipt.Digest}
 	}
@@ -507,9 +787,15 @@ func Evaluate(action Action, receipt Receipt, revoked bool, availableResultDiges
 		return Decision{State: Unknown, Reason: "result digest mismatch", ReceiptDigest: receipt.Digest}
 	}
 	if receipt.ReuseClass == "EXACT" {
+		if !admits(receipt, trustPolicy) {
+			return Decision{State: Unknown, Reason: "receipt producer, cache scope, or provenance is not trusted", ReceiptDigest: receipt.Digest}
+		}
 		return Decision{State: ReusableExact, Reason: "identity and dependencies match", ReceiptDigest: receipt.Digest}
 	}
 	if receipt.ReuseClass == "VERIFIED" {
+		if !admits(receipt, trustPolicy) {
+			return Decision{State: Unknown, Reason: "receipt producer, cache scope, or provenance is not trusted", ReceiptDigest: receipt.Digest}
+		}
 		if receipt.ValidatorIdentity == nil || pointerString(receipt.ValidatorIdentity) != pointerString(action.ValidatorIdentity) {
 			return Decision{State: RequiresValidation, Reason: "matching validator identity required", ReceiptDigest: receipt.Digest}
 		}
@@ -528,9 +814,6 @@ func Evaluate(action Action, receipt Receipt, revoked bool, availableResultDiges
 }
 
 func defaultArray(value any) ([]any, error) {
-	if value == nil {
-		return []any{}, nil
-	}
 	array, ok := value.([]any)
 	if !ok {
 		return nil, fmt.Errorf("expected array")

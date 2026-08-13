@@ -5,13 +5,13 @@ from typing import Any
 
 from oncefold.identity import SideEffectClass
 from oncefold.mcp_shadow import SHADOW_METADATA_KEY, MCPShadowProxy
-from oncefold.protocol import DecisionState, InMemoryReceiptStore
+from oncefold.protocol import DecisionState, InMemoryReceiptStore, ReceiptTrustPolicy
 
 
 def test_shadow_adapter_forwards_equivalent_calls_and_compares_results() -> None:
     store = InMemoryReceiptStore()
-    proxy = MCPShadowProxy(store)
-    request = {
+    proxy = MCPShadowProxy(store, ReceiptTrustPolicy.for_producer("mcp-server", "private"))
+    request: dict[str, Any] = {
         "jsonrpc": "2.0",
         "id": 1,
         "method": "tools/call",
@@ -34,6 +34,7 @@ def test_shadow_adapter_forwards_equivalent_calls_and_compares_results() -> None
         operation_version="tool-v1",
         trust_scope="tenant:one",
         side_effect_class=SideEffectClass.READ_ONLY,
+        dependency_completeness=True,
     )
     second = proxy.forward(
         request,
@@ -41,6 +42,7 @@ def test_shadow_adapter_forwards_equivalent_calls_and_compares_results() -> None
         operation_version="tool-v1",
         trust_scope="tenant:one",
         side_effect_class=SideEffectClass.READ_ONLY,
+        dependency_completeness=True,
     )
     assert calls == 2
     assert first.decision.state is DecisionState.UNKNOWN
@@ -56,6 +58,7 @@ def test_shadow_adapter_forwards_equivalent_calls_and_compares_results() -> None
         operation_version="tool-v1",
         trust_scope="tenant:one",
         side_effect_class=SideEffectClass.READ_ONLY,
+        dependency_completeness=True,
     )
     assert calls == 3
     assert third.decision.state is DecisionState.UNKNOWN
@@ -64,7 +67,7 @@ def test_shadow_adapter_forwards_equivalent_calls_and_compares_results() -> None
 def test_shadow_adapter_does_not_emit_receipts_for_external_mutation() -> None:
     store = InMemoryReceiptStore()
     proxy = MCPShadowProxy(store)
-    request = {"method": "tools/call", "params": {"name": "write", "arguments": {"x": 1}}}
+    request = {"method": "tools/call", "params": {"name": "write", "arguments": {"x": "1"}}}
     result = proxy.forward(
         request,
         lambda _: {"result": {"ok": True}},

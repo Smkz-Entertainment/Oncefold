@@ -1,11 +1,17 @@
 # Conformance
 
 Oncefold ships one language-neutral JSON corpus at
-[`../conformance/vectors.json`](../conformance/vectors.json). The corpus has 50
+[`../conformance/vectors.json`](../conformance/vectors.json). The corpus has 60
 cases covering exact reuse, direct and transitive dependency changes, unrelated
 changes, tool and validator changes, freshness, scope, revocation, result
 integrity, incomplete declarations, malformed fields, Unicode NFC, advisory
-and verified classes, and duplicate dependencies.
+  and verified classes, and duplicate dependencies.
+
+The document also carries shared timestamp, duplicate-key, number-rejection,
+invalid-Unicode/line-separator, prototype-key, and exact-depth ingress cases.
+The trust policy in the document binds the
+base producer, cache scope, and provenance so an exact result cannot pass only
+because its self-declared digest is valid.
 
 Each case contains an identifier and an expected decision state. A consumer
 starts from the base action and receipt, applies the case patch, optionally
@@ -22,7 +28,10 @@ Run every implementation from the repository root:
 ```powershell
 python conformance/stdlib_check.py
 python -m pytest
+npm ci
+npm run typecheck
 node --experimental-strip-types implementations/typescript/run_conformance.ts conformance/vectors.json
+go -C implementations/go test ./...
 go -C implementations/go run ./cmd/conformance ../../conformance/vectors.json
 ```
 

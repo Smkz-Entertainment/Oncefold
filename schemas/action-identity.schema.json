@@ -4,7 +4,7 @@
   "title": "Oncefold Action Identity",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "operation_identity", "operation_version", "input_digest"],
+  "required": ["schema_version", "operation_identity", "operation_version", "input_digest", "dependency_completeness"],
   "properties": {
     "schema_version": {"const": "oncefold.action/1"},
     "operation_identity": {"type": "string", "minLength": 1, "maxLength": 4096},
